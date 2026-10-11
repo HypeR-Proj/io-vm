@@ -10,6 +10,52 @@
 #include <assert.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+
+/* Keep configfs publication deterministic for control-plane tests. Actual
+ * mapper/LIO publication is exercised by the block-owner Linux fixture. */
+static int target_published = 1;
+static int target_access(const char *path, int mode)
+{
+	assert(mode == F_OK);
+	assert(!strcmp(path, "/sys/kernel/config/target/vhost/"
+		       "naa.5001405000000001/tpgt_1/lun/lun_0/disk"));
+	errno = ENOENT;
+	return target_published ? 0 : -1;
+}
+#define access target_access
+#include "../../service/block-target.c"
+#undef access
+#include "../../service/block.c"
+#include "../../service/client-config.c"
+
+static void storage_admission(void)
+{
+	struct backend backend = {0};
+	strcpy(backend.target.vhost_wwpn, "naa.5001405000000001");
+	struct hyper_io_session session = {.binding = 1};
+	struct hyper_io_header request = {.operation = htole16(HYPER_IO_HELLO)};
+	struct hyper_io_network_reply reply = {.common.header = request};
+	size_t reply_size = 48;
+	target_published = 0;
+	assert(dispatch(&backend, &session, (const unsigned char *)&request,
+			sizeof(request), &reply, &reply_size) == HYPER_IO_BUSY);
+	assert(reply_size == 48);
+	struct hyper_io_activate activation = {0};
+	assert(activate_disk(&backend, &activation) == HYPER_IO_BUSY);
+	target_published = 1;
+	assert(dispatch(&backend, &session, (const unsigned char *)&request,
+			sizeof(request), &reply, &reply_size) == HYPER_IO_OK);
+	assert(reply_size == 64);
+	for (unsigned op = HYPER_IO_BLOCK_HELLO; op <= HYPER_IO_BLOCK_BIND; ++op) {
+		request.operation = htole16(op);
+		reply.common.header = request;
+		reply_size = 48;
+		assert(dispatch(&backend, &session, (const unsigned char *)&request,
+				sizeof(request), &reply, &reply_size) == HYPER_IO_UNSUPPORTED);
+		assert(reply_size == 48);
+	}
+}
+
 static struct hyper_io_reply exchange(int fd, unsigned int op,
 				      uint64_t transaction)
 {
@@ -242,6 +288,7 @@ static void notification_queues(void)
 }
 int main(void)
 {
+	storage_admission();
 	/* A delayed IRQ masks a newer RX arm but finds no new record yet.
 	 * The actual driver predicate must return to its outer rearm loop. */
 	assert(hyper_io_wait_ready(2, 1, 7, 8));

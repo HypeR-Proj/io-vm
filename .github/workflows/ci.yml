@@ -20,6 +20,7 @@ jobs:
           python3 -B tools/publish.py --help
           python3 -B tests/io-vm/verify.py --help
           python3 -B tests/io-vm/tap-offload.py --help
+          python3 -B tests/io-vm/block-owner.py --help
       - name: Check control, retirement and network activation
         run: |
           for test in control retirement network; do
@@ -30,3 +31,8 @@ jobs:
         run: cc -static -O2 -Wall -Wextra -Werror tests/io-vm/vhost-scsi.c -o /tmp/vhost-scsi-test
       - name: Compile the Linux TAP offload acceptance fixture
         run: cc -static -O2 -Wall -Wextra -Werror tests/io-vm/tap-offload.c -o /tmp/tap-offload-test
+      - name: Compile the Linux block owner acceptance fixture
+        run: |
+          cc -static -O2 -Wall -Wextra -Werror -Iinclude \
+            tests/io-vm/block-owner.c service/block.c service/block-target.c \
+            service/client-config.c -o /tmp/block-owner-test
