@@ -47,8 +47,9 @@ source/packaging contracts and rebuilds the locked sources and external modules.
 The new kernel and packaged BusyBox then exercise block discovery, bounded reads,
 and immutable client ranges on disposable 512-byte and 4-KiB-sector disks,
 including read-only enforcement and writable overlap rejection. TAP offload,
-business boot/reset, diskless bring-up, and vhost-scsi read/write/flush acceptance
-also run before merge; the backing image is independently checked. Successful
+business boot/reset, diskless UART/virtio-console bring-up, and vhost-scsi
+read/write/flush acceptance also run before merge; the backing image is
+independently checked. Successful
 main builds automatically publish the complete appliance as an immutable
 prerelease package. These checks do not yet exercise the cross-VM
 HypeR path; that remains part of qualifying a digest for the main repository.
@@ -72,6 +73,36 @@ The current control protocol is version 3, including shared storage/network
 memory ownership. HypeR must use the matching Native control plane and package
 generation. An older notification module cannot distinguish the two device
 kinds for one client and can fail probe with duplicate device names.
+
+### Appliance console
+
+Both kernel profiles include the standard Linux virtio-console driver. The boot
+owner may pass `hyper.console=virtio` to send appliance userspace stdin, stdout
+and stderr through `/dev/hvc0`, including the version banner and backend logs.
+Init waits up to ten seconds for that tty and fails explicitly if it is absent;
+it does not silently fall back to a UART. `hyper.console=uart`, or omitting the
+argument, preserves the inherited UART stdio used by existing deployments.
+
+The Linux `console=` argument is independent: keep `console=ttyAMA0` for kernel
+and panic diagnostics. Do not add `console=hvc0` merely to select the userspace
+terminal. HypeR owns the virtual console device and its guest-memory queues;
+the appliance uses the upstream driver and does not route its own console through
+the storage or network backend services.
+
+The kernel CI matrix boots both profiles in each console mode. The virtio check
+captures userspace output and UART kernel output separately, so a broken hvc0
+path cannot pass using UART fallback. For a local built appliance:
+
+```sh
+python3 -B tests/io-vm/bringup.py \
+  --boot-index target/io-vm/qemu-boot.json --console virtio \
+  --log target/io-vm/bringup-virtio.log
+```
+
+This creates `bringup-virtio.log` for the terminal and
+`bringup-virtio.uart.log` for kernel diagnostics. `make test` also executes init
+against private tty fixtures, covering default UART behavior, redirected output,
+missing virtio devices and invalid console selection without booting QEMU.
 
 ## Package delivery
 

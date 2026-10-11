@@ -179,7 +179,14 @@ downloaded source. Re-running the build uses upstream Kbuild dependencies.
 
 The default build assembles the kernel, static BusyBox, both external modules
 and service using this repository’s `rootfs/init`; `qemu-boot.json` identifies
-the complete artifact. To explicitly assemble a separately reviewed overlay:
+the complete artifact. Kernel diagnostics use the UART selected by `console=`.
+Init keeps inherited UART stdio unless the boot owner supplies
+`hyper.console=virtio`, which requires `/dev/hvc0` and redirects all service
+stdio before printing the appliance banner. The standard virtio-console driver
+is built into both profiles. Device emulation and queue ownership remain in
+HypeR userspace; no Linux backend service handles this console's data path.
+
+To explicitly assemble a separately reviewed overlay:
 
 ```sh
 python3 -B scripts/assemble-io-vm.py \

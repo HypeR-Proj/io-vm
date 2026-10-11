@@ -20,6 +20,7 @@ all-platforms:
 	$(MAKE) base PLATFORM=rpi5 OUTPUT="$(OUTPUT)/rpi5"
 
 test:
+	python3 -B tests/build/console.py
 	python3 -B tests/build/io-vm.py
 	python3 -B tests/build/publish.py
 	python3 -B tests/build/clients.py

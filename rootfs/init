@@ -6,19 +6,44 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
-# Build identification is diagnostic; a missing banner must not prevent boot.
-cat /etc/hyper-io-version || true
 role=unset
 test_mode=none
 mode=attached
+console=uart
 read -r command_line < /proc/cmdline
 for argument in $command_line; do
     case "$argument" in
         hyper.role=*) role=${argument#hyper.role=} ;;
         hyper.mode=*) mode=${argument#hyper.mode=} ;;
         hyper.test=*) test_mode=${argument#hyper.test=} ;;
+        hyper.console=*) console=${argument#hyper.console=} ;;
     esac
 done
+# Kernel diagnostics keep their console= UART. The boot owner may separately
+# select the buffered userspace terminal without adding a second printk console.
+case "$console" in
+    uart) ;;
+    virtio)
+        attempts=0
+        while [ ! -c /dev/hvc0 ] && [ "$attempts" -lt 10 ]; do
+            sleep 1
+            attempts=$((attempts + 1))
+        done
+        if [ ! -c /dev/hvc0 ]; then
+            echo 'HypeR I/O: requested virtio console is unavailable' >&2
+            poweroff -f
+            exit 1
+        fi
+        exec </dev/hvc0 >/dev/hvc0 2>&1
+        ;;
+    *)
+        echo 'HypeR I/O: invalid hyper.console (expected uart or virtio)' >&2
+        poweroff -f
+        exit 1
+        ;;
+esac
+# Build identification is diagnostic; a missing banner must not prevent boot.
+cat /etc/hyper-io-version || true
 # Never test or export a disk unless the boot owner explicitly selected a role.
 case "$role" in io|business) ;; *) echo 'HypeR I/O: missing/invalid hyper.role'; poweroff -f; exit 1 ;; esac
 case "$mode:$role" in attached:io|attached:business|standby:io|bringup:io) ;;
