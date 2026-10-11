@@ -143,46 +143,84 @@ HELLO and RESET remain available; ACTIVATE is rejected while no client is
 provisioned. Live client attachment is not implemented by this mode. The
 existing attached deployment and disk acceptance remain unchanged.
 
-### Board volume deployments
+### Managed block devices
 
-The HypeR packager derives `/etc/hyper-volumes.conf` from the board JSON and
-includes it in the bootstrap initramfs. Its first line is `hyper.volumes.v1`;
-each subsequent line is `name PARTUUID sectors owner mapper`, with 512-byte
-sectors. Board boots set `hyper.volumes=required` so a missing manifest is fatal.
-The first volume is `config`, owned by `hyper`, mapped as `hyper-config`.
+HypeR supplies `/etc/hyper-clients.conf` with header `hyper.clients.v3` and
+`client-id network-name mac-address` lines. A missing network and MAC use `-`.
+The table includes exactly one `0 - -` entry for the Native block owner. Other
+entries identify authorized transport slots; they contain no partition UUIDs,
+volume names or disk offsets. Storage-capable slots have a disk notification
+node in the HypeR-supplied DT; network-only slots do not. Network authorization
+and MAC validation are unchanged.
 
-`hyper-volumes` validates the complete manifest, outer GPT checksums, partition
-identity, capacity and logical sector size before creating any dm-linear volume.
-Each volume receives its own LIO target; volume N uses `naa.5001405%09x` with N
-starting at 1. The appliance does not mount these filesystems, scan guest GPTs,
-or run udev, LVM, RAID discovery or automatic filesystem activation. Linux LIO
-claims the mapped block devices while exporting them. `/etc/hyper-clients.conf` begins with `hyper.clients.v2`, followed by
-`client-id volume-name network-name mac-address` lines. A missing volume or
-network uses `-`; without a network the MAC is also `-`. Client 0 exclusively
-owns `config` and reserves the Native network endpoint without creating a TAP
-or establishing a Native network link. Duplicate client IDs, volume assignments
-and MAC addresses are rejected before creating exports. Each authorized client
-receives one service process, memory mapping and mailbox. Storage and network
-have separate vhost fds, notification devices and reset epochs. A client can use
-storage, networking, or both.
+The owner enumerates physical block devices through control endpoint zero,
+reads their metadata into a bounded shared scratch buffer, and requests
+per-client LBA ranges. GPT parsing, partition selection and filesystem policy
+belong to HypeR Native userspace. Linux does not interpret a partition label or
+UUID and does not mount exported filesystems. The returned disk IDs are local
+to the appliance lifetime; the owner retains read-only device files throughout
+that lifetime. Partition devices, device-mapper devices and loop/RAM devices
+are not enumerated as independent backing hardware.
 
-Shutdown drains vhost before removing LIO exports and dm mappings. A failed
-vhost drain retains mappings until the host quarantines and destroys the I/O VM.
-Old single-disk qualification fixtures without a manifest retain their legacy
-whole-disk setup; they are not board deployment profiles.
+Enumeration at cursor zero refreshes the hardware inventory without replacing
+existing IDs, so devices that finish probing after init remain discoverable.
+The Native owner retries missing partition selectors up to its boot deadline.
+An empty inventory is valid for diskless deployments. Retained descriptors are
+checked against Linux disk sequence and capacity before metadata reads or
+binding; replacement media cannot silently inherit an earlier disk ID.
+
+A range binding creates a dm-linear device and LIO target named by client ID.
+The final LUN symlink publishes the fully prepared export. Data HELLO and
+ACTIVATE reject an unbound storage slot. Bindings are immutable until appliance
+shutdown: an identical request is idempotent, while changing an existing range
+returns BUSY. Overlapping bindings are rejected whenever either is writable;
+read-only sharing is permitted. Read-only exports set both device-mapper's
+read-only flag and LIO iblock's `readonly=1`. Data requests continue directly
+through standard virtio-scsi/vhost-scsi; the owner is not a data relay.
+
+Management commands extend protocol version 3. All integers are little-endian;
+request headers and the first 48 reply bytes retain the existing identity and
+status layout. All failures use a 48-byte reply. Only control endpoint zero
+admits these operations; Native runtime brokers must never forward them from a
+guest's data control channel.
+
+| Operation | Request after the 40-byte header | Successful reply after byte 48 |
+| --- | --- | --- |
+| `BLOCK_HELLO` (11) | Empty | `u64 capabilities = 7`, `u32 max_read_bytes = 1048576`, `u32 reserved = 0` |
+| `BLOCK_ENUM` (12) | `u32 cursor`, `u32 reserved = 0` | `u64 disk_id`, `u64 capacity_bytes`, `u32 logical_sector_size`, `u32 physical_sector_size`, `u32 flags`, `u32 next_cursor` |
+| `BLOCK_READ` (13) | `u64 disk_id`, `u64 byte_offset`, `u64 byte_length`, `u64 scratch_offset` | Empty |
+| `BLOCK_BIND` (14) | `u32 client`, `u32 flags`, `u64 disk_id`, `u64 first_lba`, `u64 sector_count` | Empty |
+
+`BLOCK_HELLO` starts the owner's binding session even if no disk exists.
+Capabilities bits 0/1/2 mean enumerate/read/bind. Enumeration starts at cursor
+zero, follows `next_cursor`, and ends with an all-zero 32-byte payload.
+Flags bit 0 means read-only; no other flags are accepted. Binding LBAs use the
+enumerated logical sector size; the backend converts them to device-mapper's
+512-byte units after overflow and capacity checks. Reads must be logical-sector
+aligned and fit both the disk and the owner's prepared scratch mapping.
+`PREPARE_MEMORY` maps at most 1 MiB for the owner, using the static alias and
+mapping token zero. A read completes before its reply is published, and the
+owner must not access its destination concurrently. No management operation
+writes directly to a raw disk.
+
+Each data client retains one service process, memory mapping and mailbox.
+Storage and networking keep separate vhost fds, notifications and reset epochs.
+Releasing a client's memory drains its vhost devices but retains the immutable
+range for subsequent VM starts. Published LIO and dm mappings remain until
+appliance shutdown; a manager process exit must not remove another client's
+live DMA resources. Standalone single-disk qualification fixtures without the
+client table retain their explicit whole-disk setup.
 
 For managed slots, each mailbox, notification and guest-memory DTB node carries
 `hyper,client-id = <N>` (0 through 127). The devices are named
 `hyper-io-control-N`, `hyper-io-notification-N` and `hyper-memory-N`. Omitting this
-property preserves legacy naming and fixture behavior. Static guest-memory nodes retain their reserved-memory backing for the Native
-config client. Dynamic nodes instead carry `hyper,dynamic-memory` plus a `reg`
+property preserves legacy naming and fixture behavior. Static guest-memory nodes retain their reserved-memory backing for Native scratch and filesystem I/O pools. Dynamic nodes instead carry `hyper,dynamic-memory` plus a `reg`
 aperture; they are not declared as Linux RAM and allocate neither host backing
 nor Linux page metadata at boot. PREPARE registers only the authorized actual
 extent using upstream `MEMORY_DEVICE_GENERIC` / `memremap_pages`. Dynamic
 grants retain 4 KiB page granularity; shared 2 MiB device-page metadata is
-created on demand and reference-counted across grants. The current HypeR Native
-configuration client supplies a 1 MiB static pool; its extent comes from the
-guest DT. A client is bounded to 1,048,576 pages (4 GiB).
+created on demand and reference-counted across grants. The HypeR Native owner and filesystem clients each supply bounded static
+pools; their extents come from the guest DT. A client is bounded to 1,048,576 pages (4 GiB).
 The alias uses a fixed affine translation of the host physical address,
 represented by standard dma-ranges without rewriting device DMA operations. The HypeR owner excludes
 its I/O VM RAM and static translated pools from that translated range, and must
@@ -209,7 +247,7 @@ Dynamic mapping tokens are one-use identities issued by HypeR. After all vhost,
 VMA and pgmap references have retired, the Linux notification module writes the
 token to the backend notification register at offset `0x20`. HypeR authenticates
 the actual trapping VM before marking the mapping quiescent. A mailbox reply
-alone is not permission to revoke a live mapping. Static config uses token 0
+alone is not permission to revoke a live mapping. Static Native pools use token 0
 and does not produce this dynamic-grant proof. A failed memory retirement keeps
 the slot owned and cannot be bypassed with HELLO for a new binding.
 
@@ -251,8 +289,7 @@ Running it on QEMU checks guest boot, not physical devices or DMA.
 For initial Pi 5 guest bring-up, HypeR may select
 `hyper.role=io hyper.mode=bringup`. This mode boots Linux userspace and waits
 under Native VM supervision without probing storage, exporting a LUN, loading
-bridge modules, or advertising backend-service readiness. Do not supply volume
-or client configuration in this mode. Storage-backed deployments continue to
+bridge modules, or advertising backend-service readiness. Do not supply client configuration in this mode. Storage-backed deployments continue to
 use `standby` or `attached`; bring-up is never an automatic error fallback.
 
 Sharing this repository does not relicense Linux, BusyBox or the GPL bridge

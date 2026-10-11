@@ -18,6 +18,7 @@ struct endpoint {
 	int kick[HYPER_IO_QUEUES], call[HYPER_IO_QUEUES];
 	int bound, attached;
 };
+struct block_owner;
 /* One client owns memory; devices may only borrow it until their drain. */
 struct backend {
 	struct endpoint disk, net;
@@ -31,6 +32,7 @@ struct backend {
 	unsigned char mac[6];
 	uint64_t token;
 	unsigned diagnostics;
+	struct block_owner *blocks;
 };
 static inline struct endpoint *memory_endpoint(struct backend *b)
 {

@@ -51,7 +51,8 @@ int prepare_memory(struct backend *b,
 	    b->token)
 		return HYPER_IO_BUSY;
 	if (!length || length % 4096 || base % 4096 ||
-	    base > UINT64_MAX - length || (uint64_t)(size_t)length != length)
+	    base > UINT64_MAX - length || (uint64_t)(size_t)length != length ||
+	    (b->blocks && (length > HYPER_IO_BLOCK_MAX_READ || prepare.token)))
 		return HYPER_IO_INVALID;
 	uint64_t *pages = NULL;
 	if (prepare.token) {

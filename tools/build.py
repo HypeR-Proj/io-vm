@@ -221,7 +221,7 @@ def main():
     for name in ("Makefile", "tools/build.py", "scripts/assemble-io-vm.py", "rootfs/init",
                  "service/hyper-io-service.c", "service/backend.h", "service/memory.c",
                  "service/vhost.c", "service/network.c", "service/network-config.c",
-                 "service/hyper-networks.c", "include/hyper_network.h", "service/hyper-volumes.c", "service/hyper-io-supervisor.c", "include/hyper_io_session.h", "include/hyper_io_layout.h", "tests/io-vm/business-disk.c", "sources.lock.json",
+                 "service/hyper-networks.c", "include/hyper_network.h", "service/block.c", "service/block-target.c", "service/block.h", "service/client-config.c", "include/hyper_clients.h", "include/hyper_block_policy.h", "service/hyper-io-supervisor.c", "include/hyper_io_session.h", "include/hyper_io_layout.h", "tests/io-vm/business-disk.c", "sources.lock.json",
                  "configs/linux-aarch64.config", "configs/busybox.config", "LICENSE", "LICENSES/GPL-2.0-only.txt"):
         input_hashes[name] = digest(ROOT / name)
     input_hashes.update({str(fix.relative_to(ROOT)): digest(fix) for fix in linux_patches})
@@ -245,14 +245,15 @@ def main():
         module_identity = hashlib.sha256("".join(digest(path) for path in source_files).encode()).hexdigest()
     binaries = []
     for source, name in (("service/hyper-io-service.c", "hyper-io-service"),
-                         ("service/hyper-volumes.c", "hyper-volumes"),
                          ("service/hyper-networks.c", "hyper-networks"),
                          ("service/hyper-io-supervisor.c", "hyper-io-supervisor"),
                          ("tests/io-vm/business-disk.c", "hyper-disk-test")):
         binary = build / name
         extra = []
         if name == "hyper-io-service":
-            extra = [ROOT / "service" / part for part in ("memory.c", "vhost.c", "network.c", "network-config.c")]
+            extra = [ROOT / "service" / part for part in ("memory.c", "vhost.c", "network.c", "network-config.c", "block.c", "block-target.c", "client-config.c")]
+        elif name == "hyper-io-supervisor":
+            extra = [ROOT / "service/client-config.c"]
         elif name == "hyper-networks":
             extra = [ROOT / "service/network-config.c"]
         run([args.cross_compile + "gcc", "-static", "-O2", "-Wall", "-Wextra", "-Werror",

@@ -7,8 +7,7 @@ This repository owns the complete Linux I/O appliance: upstream source locks,
 kernel configuration, external modules, Linux userspace services, initramfs,
 backend tests, and package publication. HypeR owns Native apps, DTS/DTB,
 virtual hardware, and launch policy. HypeR imports a digest-pinned package;
-it does not rebuild Linux. Its board packager adds versioned bootstrap volume,
-client and network manifests to the imported rootfs; executable Linux components remain
+it does not rebuild Linux. Its board packager adds versioned client and network manifests to the imported rootfs; executable Linux components remain
 owned and built here.
 
 The base initramfs includes BusyBox's full `modprobe`, the matching kernel's
@@ -18,9 +17,10 @@ such as `target_core_iblock` succeed without looking for a nonexistent `.ko`;
 unknown modules still fail. Disk acceptance checks both cases, loads the external
 guest-memory module by name, and rejects target-core autoload failure messages.
 
-Linux remains unmodified upstream, initially 6.18.51 from the 6.18 LTS series.
-`sources.lock.json` pins archive checksums. Hyper-specific drivers are external
-modules built against that exact kernel. No private Linux patch set is used.
+Linux uses the pinned 6.18.51 source from the 6.18 LTS series with the
+reviewed vhost work-ordering fix under `patches/linux`. `sources.lock.json`
+pins archive checksums. Hyper-specific drivers remain external modules built
+against that exact kernel.
 
 Own build recipes and tests retain Apache-2.0; `modules/` is GPL-2.0-only.
 Self-authored headers shared by the userspace service and modules offer
@@ -44,8 +44,8 @@ vhost-scsi/LIO write/flush/read verification. HypeR's integration tests separate
 exercise the cross-VM Native ownership and notification paths. A Linux-only
 acceptance result does not prove those paths or Pi 5 physical DMA.
 
-Board deployment adds dm-linear ownership, managed clients, Native config
-storage, dynamic scatter grants and guest networking. HypeR separately checks
+Board deployment adds Native-owned block discovery and range authorization,
+managed clients, Native filesystem storage, dynamic scatter grants and guest networking. HypeR separately checks
 DHCP, HTTP integrity, independent network reset, VM restart and shared-memory
 retirement through its virtio-net frontend. These cross-VM checks qualify an
 exact package for HypeR adoption; automatic prerelease publication does not
@@ -85,6 +85,22 @@ configuration have succeeded. Device reset first disables new submissions,
 quiesces the backend, and then releases resources. Linux vhost ioctl numbers
 remain Linux-local: the cross-VM bridge is not an ioctl forwarding ABI.
 
+## Storage policy ownership
+
+Control endpoint zero belongs only to the Native owner. Linux returns raw disk
+geometry and reads metadata into the owner's scratch mapping; HypeR validates
+GPT and chooses the concrete range. The backend accepts no logical volume
+names, filesystem formats, partition labels or UUIDs. Data clients cannot
+perform these management operations.
+
+Linux validates every binding against disk geometry and the authorized endpoint
+set, and rejects writable overlaps. A dm-linear range and LIO read-only policy
+are fully prepared before publishing the LUN. The binding is immutable for the
+appliance lifetime and survives memory release/reuse. Linux keeps exports
+until shutdown, so a manager exit cannot revoke another client's active DMA.
+The frontend's long-lived Native block capability therefore never changes its
+capacity or backing range underneath a filesystem worker.
+
 ## Shared pages and DMA
 
 Direct queue consumption requires Linux to access queue metadata, responses,
@@ -103,12 +119,12 @@ from the authorized pages and shares reference-counted 2 MiB device-page metadat
 across grants. Ordinary guest pages retain 4 KiB allocation granularity. Actual
 grant aliases use a fixed affine host-address mapping represented by dma-ranges;
 unused aperture addresses are neither ordinary Linux RAM nor preallocated guest
-storage. Static config storage uses its bounded reserved pool.
+storage. Native filesystem storage and owner-side discovery each use bounded reserved pools.
 
 Release drains vhost, unmaps the client view, retires its metadata references,
 and writes a guest-origin quiescence proof. Only then may Native ownership
 release the mapping and flush stage-2 translations. The register and bootstrap
-formats are documented in [README](README.md#board-volume-deployments).
+formats are documented in [README](README.md#managed-block-devices).
 
 Final metadata users leave the shared granule registry under its mutex. The
 driver retires at most 32 entries from each caller's existing array at a time,

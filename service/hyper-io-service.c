@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #define _GNU_SOURCE
 #include "backend.h"
+#include "block.h"
 #include "hyper_io_session.h"
 #include "hyper_network.h"
 #include <endian.h>
@@ -23,6 +24,9 @@ _Static_assert(sizeof(struct hyper_io_network_activate) == 112,
 _Static_assert(sizeof(struct hyper_io_network_reply) == 80,
 	       "network reply layout");
 _Static_assert(sizeof(struct hyper_io_prepare_memory) == 72, "prepare layout");
+_Static_assert(sizeof(struct hyper_io_block_info) == 80, "block enumeration layout");
+_Static_assert(sizeof(struct hyper_io_block_read) == 72, "block read layout");
+_Static_assert(sizeof(struct hyper_io_block_bind) == 72, "block binding layout");
 static volatile sig_atomic_t stopping;
 static void stop_signal(int signal)
 {
@@ -52,6 +56,14 @@ static const char *operation_name(uint16_t operation)
 		return "NETWORK_RESET";
 	case HYPER_IO_NETWORK_STOP_QUEUE:
 		return "NETWORK_STOP_QUEUE";
+	case HYPER_IO_BLOCK_HELLO:
+		return "BLOCK_HELLO";
+	case HYPER_IO_BLOCK_ENUM:
+		return "BLOCK_ENUM";
+	case HYPER_IO_BLOCK_READ:
+		return "BLOCK_READ";
+	case HYPER_IO_BLOCK_BIND:
+		return "BLOCK_BIND";
 	default:
 		return "UNKNOWN";
 	}
@@ -88,6 +100,7 @@ void diagnostic(struct backend *b, const char *format, ...)
 	vsnprintf(message, sizeof(message), format, arguments);
 	va_end(arguments);
 	fprintf(stderr, "HypeR I/O [%s]: %s\n",
+		b->blocks ? "block-owner" :
 		b->target.vhost_wwpn[0] ? b->target.vhost_wwpn : b->bridge,
 		message);
 }
@@ -111,6 +124,8 @@ static uint32_t dispatch(struct backend *b, struct hyper_io_session *session,
 	}
 	if (!hyper_io_session_preparable(session))
 		return HYPER_IO_INVALID;
+	if (operation >= HYPER_IO_BLOCK_HELLO && operation <= HYPER_IO_BLOCK_BIND)
+		return block_dispatch(b, message, size, response, reply_size);
 	switch (operation) {
 	case HYPER_IO_HELLO:
 	case HYPER_IO_NETWORK_HELLO:
@@ -119,6 +134,8 @@ static uint32_t dispatch(struct backend *b, struct hyper_io_session *session,
 		if ((operation == HYPER_IO_NETWORK_HELLO && !b->network) ||
 		    (operation == HYPER_IO_HELLO && !b->target.vhost_wwpn[0]))
 			return HYPER_IO_UNSUPPORTED;
+		if (operation == HYPER_IO_HELLO && !block_target_ready(b))
+			return HYPER_IO_BUSY;
 		response->common.features = htole64(
 		    operation == HYPER_IO_HELLO ? VERSION_1 : NETWORK_FEATURES);
 		response->common.queues = htole32(
@@ -204,7 +221,7 @@ static int serve(struct backend *b, int control)
 			 epoch = le64toh(header.epoch);
 		uint64_t transaction = le64toh(header.transaction);
 		uint16_t operation = le16toh(header.operation);
-		unsigned primary = b->target.vhost_wwpn[0] ? 0 : 1;
+		unsigned primary = b->blocks || b->target.vhost_wwpn[0] ? 0 : 1;
 		unsigned device = operation >= HYPER_IO_NETWORK_HELLO &&
 				  operation <= HYPER_IO_NETWORK_STOP_QUEUE;
 		if (operation == HYPER_IO_PREPARE_MEMORY ||
@@ -216,11 +233,11 @@ static int serve(struct backend *b, int control)
 		    !binding || !transaction || !epoch || epoch > UINT32_MAX)
 			return -1;
 		diagnostic(b, "request %s", operation_name(operation));
+		unsigned hello = b->blocks ? HYPER_IO_BLOCK_HELLO :
+			primary ? HYPER_IO_NETWORK_HELLO : HYPER_IO_HELLO;
 		int admission = hyper_io_session_admit(
 		    &session, binding, epoch,
-		    operation == (primary ? HYPER_IO_NETWORK_HELLO
-					  : HYPER_IO_HELLO) &&
-			size == 40,
+		    operation == hello && size == 40,
 		    b->managed ? idle(b) : !session.binding, device);
 		if (admission > 0) {
 			last_transaction = 0;
@@ -292,9 +309,14 @@ int main(int argc, char **argv)
 	if (sigaction(SIGTERM, &action, NULL) ||
 	    sigaction(SIGINT, &action, NULL))
 		return 1;
-	if (strcmp(argv[2], "-"))
+	int owner = b.managed && !strcmp(argv[2], "owner");
+	if (owner && block_owner_create(&b.blocks, "/etc/hyper-clients.conf"))
+		return 1;
+	if (!owner && strcmp(argv[2], "-"))
 		memcpy(b.target.vhost_wwpn, argv[2], strlen(argv[2]) + 1);
-	if (b.managed && strcmp(argv[5], "-")) {
+	if (owner && (strcmp(argv[3], "/dev/hyper-io-control-0") || strcmp(argv[5], "-")))
+		return 2;
+	if (!owner && b.managed && strcmp(argv[5], "-")) {
 		if (hyper_mac_parse(argv[6], b.mac) ||
 		    network_bridge("/etc/hyper-networks.conf", argv[5],
 				   b.bridge))
@@ -332,7 +354,7 @@ int main(int argc, char **argv)
 		return 1;
 	printf("HypeR I/O: %s service ready [%s]\n",
 	       standby ? "standby" : "backend",
-	       b.target.vhost_wwpn[0] ? b.target.vhost_wwpn : b.bridge);
+	       owner ? "block-owner" : b.target.vhost_wwpn[0] ? b.target.vhost_wwpn : b.bridge);
 	fflush(stdout);
 	int result = serve(&b, control);
 	if (release_memory(&b) != HYPER_IO_OK) {
@@ -346,5 +368,6 @@ int main(int argc, char **argv)
 		close(b.disk.notification);
 	if (b.net.notification >= 0)
 		close(b.net.notification);
+	block_owner_destroy(b.blocks);
 	return result ? 1 : 0;
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #define _GNU_SOURCE
 #include "backend.h"
+#include "block.h"
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -204,6 +205,8 @@ int activate_disk(struct backend *b, const struct hyper_io_activate *message)
 {
 	if (!b->target.vhost_wwpn[0])
 		return HYPER_IO_UNSUPPORTED;
+	if (!block_target_ready(b))
+		return HYPER_IO_BUSY;
 	if (le64toh(message->features) != VERSION_1)
 		return HYPER_IO_INVALID;
 	int status =
