@@ -145,13 +145,15 @@ failed:
 }
 int block_target_ready(const struct backend *backend)
 {
-	char path[160];
+	static const char format[] =
+	    "/sys/kernel/config/target/vhost/%s/tpgt_1/lun/lun_0/disk";
+	char path[sizeof(format) + sizeof(backend->target.vhost_wwpn)];
 	if (!backend->target.vhost_wwpn[0])
 		return 0;
-	snprintf(path, sizeof(path),
-		 "/sys/kernel/config/target/vhost/%s/tpgt_1/lun/lun_0/disk",
-		 backend->target.vhost_wwpn);
-	return !access(path, F_OK);
+	int length = snprintf(path, sizeof(path), format,
+			      backend->target.vhost_wwpn);
+	return length >= 0 && (size_t)length < sizeof(path) &&
+	       !access(path, F_OK);
 }
 int block_target_publish(unsigned client, dev_t device, unsigned logical,
 			 const struct hyper_block_range *range)
