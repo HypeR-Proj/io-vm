@@ -20,6 +20,12 @@
 #define HYPER_IO_NETWORK_ACTIVATE 8
 #define HYPER_IO_NETWORK_RESET 9
 #define HYPER_IO_NETWORK_STOP_QUEUE 10
+#define HYPER_IO_BLOCK_HELLO 11
+#define HYPER_IO_BLOCK_ENUM 12
+#define HYPER_IO_BLOCK_READ 13
+#define HYPER_IO_BLOCK_BIND 14
+#define HYPER_IO_BLOCK_READ_ONLY 1U
+#define HYPER_IO_BLOCK_MAX_READ (1U << 20)
 #define HYPER_IO_NETWORK_QUEUES 2
 #define HYPER_IO_OK 0
 #define HYPER_IO_UNSUPPORTED 1
@@ -62,6 +68,28 @@ struct hyper_io_network_reply {
 	__u8 mac[6];
 	__le16 mtu;
 	__le64 reserved;
+};
+/* These operations exist only on the Native owner's control endpoint zero.
+ * Disk identifiers remain valid for this appliance's lifetime. LBAs below use
+ * the enumerated logical sector size, never an implicit 512-byte unit. */
+struct hyper_io_block_enum {
+	struct hyper_io_header header;
+	__le32 cursor, reserved;
+};
+struct hyper_io_block_info {
+	struct hyper_io_header header;
+	__le32 status, reserved;
+	__le64 disk, bytes;
+	__le32 logical_sector, physical_sector, flags, next_cursor;
+};
+struct hyper_io_block_read {
+	struct hyper_io_header header;
+	__le64 disk, offset, length, memory_offset;
+};
+struct hyper_io_block_bind {
+	struct hyper_io_header header;
+	__le32 client, flags;
+	__le64 disk, first_lba, sectors;
 };
 /* Linux-local control ABI. File descriptor numbers never cross the VM boundary. */
 struct hyper_io_eventfds {

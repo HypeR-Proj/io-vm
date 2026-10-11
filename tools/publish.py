@@ -24,7 +24,7 @@ SPEC.loader.exec_module(ARCHIVE)
 REQUIRED_SOURCES = {
     'Makefile', 'tools/build.py', 'scripts/assemble-io-vm.py', 'rootfs/init',
     'include/hyper_io.h', 'include/hyper_io_layout.h', 'include/hyper_io_session.h',
-    'service/hyper-volumes.c', 'service/hyper-io-supervisor.c', 'modules/guest-memory/Makefile',
+    'service/block.c', 'service/block-target.c', 'service/block.h', 'service/client-config.c', 'include/hyper_clients.h', 'include/hyper_block_policy.h', 'service/hyper-io-supervisor.c', 'modules/guest-memory/Makefile',
     'modules/guest-memory/memory.c', 'modules/guest-memory/granules.c',
     'modules/guest-memory/granules.h', 'modules/io-bridge/Makefile',
     'modules/io-bridge/hyper_io_bridge.c', 'service/hyper-io-service.c',

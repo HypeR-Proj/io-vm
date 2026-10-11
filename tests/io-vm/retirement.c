@@ -45,6 +45,7 @@ static int retirement_ioctl(int fd, unsigned long command, ...)
 #include "../../service/network.c"
 #include "../../service/vhost.c"
 #undef ioctl
+#include "../../service/block-target.c"
 void diagnostic(struct backend *backend, const char *format, ...)
 {
 	(void)backend;

@@ -22,4 +22,4 @@ all-platforms:
 test:
 	python3 -B tests/build/io-vm.py
 	python3 -B tests/build/publish.py
-	python3 -B tests/build/volumes.py
+	python3 -B tests/build/clients.py
