@@ -18,7 +18,8 @@ static int network_name(const char *name)
 			return 0;
 	return 1;
 }
-int hyper_clients_read(const char *path, struct hyper_client *clients,
+int hyper_clients_read(const char *path,
+		       struct hyper_client clients[HYPER_BLOCK_CLIENTS],
 		       unsigned *count)
 {
 	char line[160];
