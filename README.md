@@ -41,10 +41,14 @@ The QEMU and Pi 5 profiles are built and published separately. Select
 `make all-platforms` to produce both. Platform annotations identify the build
 profile; physical board and DMA qualification remain separate.
 
-Every push to `main` automatically runs the **Upstream kernel and real-disk
-acceptance** GitHub workflow. It checks source/packaging contracts, rebuilds
-the locked sources and external module, then verifies vhost-scsi against a
-QEMU virtio-scsi disk and independently checks the backing image. Successful
+Pull requests targeting `main` and every push to `main` run the **Upstream kernel
+and real-disk acceptance** GitHub workflow for both build profiles. It checks
+source/packaging contracts and rebuilds the locked sources and external modules.
+The new kernel and packaged BusyBox then exercise block discovery, bounded reads,
+and immutable client ranges on disposable 512-byte and 4-KiB-sector disks,
+including read-only enforcement and writable overlap rejection. TAP offload,
+business boot/reset, diskless bring-up, and vhost-scsi read/write/flush acceptance
+also run before merge; the backing image is independently checked. Successful
 main builds automatically publish the complete appliance as an immutable
 prerelease package. These checks do not yet exercise the cross-VM
 HypeR path; that remains part of qualifying a digest for the main repository.
