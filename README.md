@@ -387,3 +387,15 @@ Network notifications carry `hyper,device-kind = "network"` beside
 `hyper,client-id`, producing `/dev/hyper-io-notification-N-net`. A network-only
 client uses this route for memory admission and retirement; it has no hidden
 storage notification or LIO target. Native client 0 cannot request networking.
+
+## Hotplugged virtio serial ports
+
+The common AArch64 kernel enables PCIe port services, PCIe hotplug and the
+standard virtio-console driver. A HypeR formal runtime can add a named virtio
+serial port behind a root port that was present when this appliance booted.
+Linux discovers the function from a slot-change interrupt; it does not require
+a reboot or a manual PCI rescan.
+
+This kernel configuration does not create ports, change `console=ttyAMA0`, or
+start a QEMU guest-agent daemon. Device presentation and port access belong to
+the HypeR runtime; existing storage and network protocols remain unchanged.
