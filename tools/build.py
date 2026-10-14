@@ -21,6 +21,11 @@ import tarfile
 import tempfile
 import urllib.request
 
+# Also importable by the packaging unit tests through importlib.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import guest_agent
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("io_archive", ROOT / "scripts/assemble-io-vm.py")
@@ -84,7 +89,8 @@ def unpack(archive, component, sources, name, patches=()):
     with tempfile.TemporaryDirectory(dir=sources) as temporary:
         staging = Path(temporary)
         with tarfile.open(archive) as source:
-            source.extractall(staging, filter="data")
+            source.extractall(staging, members=(member for member in source
+                if name != "qemu" or "/roms/" not in member.name), filter="data")
         expanded = staging / source_name
         for fix in patches:
             run(["patch", "--batch", "--fuzz=0", "-p1", "-i", str(fix.resolve())], cwd=expanded)
@@ -168,10 +174,11 @@ def main():
     output = args.output.resolve()
     sources = {}
     linux_patches = tuple(sorted((ROOT / "patches/linux").glob("*.patch")))
-    for name in ("linux", "busybox"):
+    qemu_patches = tuple(sorted((ROOT / "patches/qemu").glob("*.patch")))
+    for name in ("linux", "busybox", *guest_agent.COMPONENTS):
         archive = fetch(lock[name], output / "downloads")
-        sources[name] = unpack(archive, lock[name], output / "sources", name,
-                               linux_patches if name == "linux" else ())
+        patches = {"linux": linux_patches, "qemu": qemu_patches}.get(name, ())
+        sources[name] = unpack(archive, lock[name], output / "sources", name, patches)
     if args.fetch_only:
         return
     if platform.system() != "Linux":
@@ -218,13 +225,14 @@ def main():
                     "modules/io-bridge/hyper_io_bridge.c"]
     input_hashes = {name: digest(checkout / name) for name in module_paths}
     source_dirty |= any(input_hashes[name] != digest(ROOT / name) for name in module_paths)
-    for name in ("Makefile", "tools/build.py", "scripts/assemble-io-vm.py", "rootfs/init",
+    for name in ("Makefile", "tools/build.py", "tools/guest_agent.py", "scripts/assemble-io-vm.py", "rootfs/init", "rootfs/usr/bin/hyper-guest-agent",
                  "service/hyper-io-service.c", "service/backend.h", "service/memory.c",
                  "service/vhost.c", "service/network.c", "service/network-config.c",
                  "service/hyper-networks.c", "include/hyper_network.h", "service/block.c", "service/block-target.c", "service/block.h", "service/client-config.c", "include/hyper_clients.h", "include/hyper_block_policy.h", "service/hyper-io-supervisor.c", "include/hyper_io_session.h", "include/hyper_io_layout.h", "tests/io-vm/business-disk.c", "sources.lock.json",
                  "configs/linux-aarch64.config", "configs/busybox.config", "LICENSE", "LICENSES/GPL-2.0-only.txt"):
         input_hashes[name] = digest(ROOT / name)
-    input_hashes.update({str(fix.relative_to(ROOT)): digest(fix) for fix in linux_patches})
+    input_hashes.update({str(fix.relative_to(ROOT)): digest(fix)
+                         for fix in (*linux_patches, *qemu_patches)})
     if args.platform == "rpi5":
         input_hashes["configs/linux-rpi5.config"] = digest(ROOT / "configs/linux-rpi5.config")
     modules = []
@@ -243,7 +251,7 @@ def main():
                 raise ValueError("external module does not match this kernel release")
             modules.append(module)
         module_identity = hashlib.sha256("".join(digest(path) for path in source_files).encode()).hexdigest()
-    binaries = []
+    binaries = [guest_agent.build(sources, output, args.cross_compile, args.jobs, run)]
     for source, name in (("service/hyper-io-service.c", "hyper-io-service"),
                          ("service/hyper-networks.c", "hyper-networks"),
                          ("service/hyper-io-supervisor.c", "hyper-io-supervisor"),

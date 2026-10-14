@@ -22,7 +22,9 @@ SPEC.loader.exec_module(ARCHIVE)
 
 
 REQUIRED_SOURCES = {
-    'Makefile', 'tools/build.py', 'scripts/assemble-io-vm.py', 'rootfs/init',
+    'Makefile', 'tools/build.py', 'tools/guest_agent.py',
+    'rootfs/usr/bin/hyper-guest-agent',
+    'patches/qemu/0001-qga-read-only-memory-statistics.patch', 'scripts/assemble-io-vm.py', 'rootfs/init',
     'include/hyper_io.h', 'include/hyper_io_layout.h', 'include/hyper_io_session.h',
     'service/block.c', 'service/block-target.c', 'service/block.h', 'service/client-config.c', 'include/hyper_clients.h', 'include/hyper_block_policy.h', 'service/hyper-io-supervisor.c', 'modules/guest-memory/Makefile',
     'modules/guest-memory/memory.c', 'modules/guest-memory/granules.c',
@@ -59,7 +61,7 @@ def verify_sources(sources, metadata, revision):
     expected['resolved/linux.config'] = metadata['kernel_config_sha256']
     expected['resolved/busybox.config'] = metadata['busybox_config_sha256']
     expected['resolved/compiler.txt'] = metadata['compiler_sha256']
-    for component in ('linux', 'busybox'):
+    for component in ('linux', 'busybox', 'qemu', 'glib', 'libffi', 'pcre2', 'zlib'):
         identity = metadata['source_lock'][component]
         expected['upstream/' + identity['url'].rsplit('/', 1)[1]] = identity['sha256']
     if any(not re.fullmatch(r'[0-9a-f]{64}', value) for value in expected.values()):

@@ -22,6 +22,7 @@ jobs:
           python3 -B tests/io-vm/tap-offload.py --help
           python3 -B tests/io-vm/block-owner.py --help
           python3 -B tests/io-vm/bringup.py --help
+          python3 -B tests/io-vm/guest-agent.py --help
       - name: Check control, retirement and network activation
         run: |
           for test in control retirement network; do

@@ -27,6 +27,8 @@ class ConsoleInitTests(unittest.TestCase):
             root = Path(temporary)
             (root / 'cmdline').write_text('hyper.role=io hyper.mode=bringup ' + option + '\n')
             (root / 'version').write_text(VERSION)
+            (root / 'agent').write_text('#!/bin/sh\nexit 0\n')
+            (root / 'agent').chmod(0o755)
             calls = root / 'calls'
             master, slave = pty.openpty()
             try:
@@ -37,7 +39,8 @@ class ConsoleInitTests(unittest.TestCase):
                         ('/proc/cmdline', 'cmdline'),
                         ('/etc/hyper-io-version', 'version'),
                         ('/etc/hyper-clients.conf', 'clients'),
-                        ('/dev/hvc0', 'hvc0')):
+                        ('/dev/hvc0', 'hvc0'),
+                        ('/usr/bin/hyper-guest-agent', 'agent')):
                     script = script.replace(original, str(root / fixture))
                 # Init's real parsing, tty redirection, banner and bring-up
                 # path run unchanged; only privileged commands are replaced.

@@ -1,0 +1,127 @@
+From: roolrz <roolrz@users.noreply.github.com>
+Subject: [PATCH] qga: add a stateless read-only Linux memory statistics command
+SPDX-FileCopyrightText: 2026 roolrz
+SPDX-License-Identifier: GPL-2.0-or-later
+
+The appliance permits only diagnostic RPCs.  Avoid the stateful guest-file
+API, whose open handle can outlive a timed-out host request.  CPU statistics
+continue to use the unmodified upstream guest-get-cpustats command.
+
+--- a/qga/meson.build
++++ b/qga/meson.build
+@@ -83,7 +83,7 @@
+     'commands-posix-ssh.c',
+   ))
+   if host_os == 'linux'
+-    qga_ss.add(files('commands-linux.c'))
++    qga_ss.add(files('commands-linux.c', 'commands-hyper.c'))
+   elif host_os in bsd_oses
+     qga_ss.add(files('commands-bsd.c'))
+   endif
+--- a/qga/qapi-schema.json
++++ b/qga/qapi-schema.json
+@@ -1952,3 +1952,37 @@
+   'returns': ['GuestNetworkRoute'],
+   'if': { 'any': ['CONFIG_LINUX', 'CONFIG_WIN32'] }
+ }
++
++##
++# @GuestHyperMemoryStats:
++#
++# Linux memory accounting in bytes; HypeR appliance extension.
++# no file handles or mutable guest state are exposed.
++#
++# @total-bytes: MemTotal
++# @available-bytes: MemAvailable (includes reclaimable memory)
++# @free-bytes: MemFree
++# @buffers-bytes: Buffers
++# @cached-bytes: Cached
++# @reclaimable-slab-bytes: SReclaimable
++#
++# Since: 11.0
++##
++{ 'struct': 'GuestHyperMemoryStats',
++  'data': { 'total-bytes': 'uint64', 'available-bytes': 'uint64',
++            'free-bytes': 'uint64', 'buffers-bytes': 'uint64',
++            'cached-bytes': 'uint64', 'reclaimable-slab-bytes': 'uint64' },
++  'if': 'CONFIG_LINUX' }
++
++##
++# @guest-hyper-get-memory-stats:
++#
++# Read /proc/meminfo and close it before returning.
++# This is a HypeR appliance extension.
++#
++# Returns: Linux memory accounting in bytes.
++#
++# Since: 11.0
++##
++{ 'command': 'guest-hyper-get-memory-stats',
++  'returns': 'GuestHyperMemoryStats', 'if': 'CONFIG_LINUX' }
+--- /dev/null
++++ b/qga/commands-hyper.c
+@@ -0,0 +1,64 @@
++/* SPDX-FileCopyrightText: 2026 roolrz
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ *
++ * Stateless memory observation for the HypeR I/O appliance.
++ */
++#include "qemu/osdep.h"
++#include "qga-qapi-commands.h"
++#include "qapi/error.h"
++
++GuestHyperMemoryStats *qmp_guest_hyper_get_memory_stats(Error **errp)
++{
++    static const char *const names[] = {
++        "MemTotal:", "MemAvailable:", "MemFree:",
++        "Buffers:", "Cached:", "SReclaimable:"
++    };
++    uint64_t values[G_N_ELEMENTS(names)] = { 0 };
++    unsigned int found = 0;
++    char line[256];
++    FILE *file = fopen("/proc/meminfo", "r");
++    GuestHyperMemoryStats *result;
++
++    if (!file) {
++        error_setg_errno(errp, errno, "cannot open /proc/meminfo");
++        return NULL;
++    }
++    while (fgets(line, sizeof(line), file)) {
++        char name[64], unit[8], extra;
++        uint64_t value;
++        size_t i;
++
++        if (sscanf(line, "%63s %" SCNu64 " %7s %c",
++                   name, &value, unit, &extra) != 3) {
++            continue;
++        }
++        for (i = 0; i < G_N_ELEMENTS(names); i++) {
++            if (strcmp(name, names[i])) {
++                continue;
++            }
++            if (strcmp(unit, "kB") || value > UINT64_MAX / 1024 ||
++                (found & (1U << i))) {
++                fclose(file);
++                error_setg(errp, "invalid /proc/meminfo field");
++                return NULL;
++            }
++            values[i] = value * 1024;
++            found |= 1U << i;
++        }
++    }
++    if (ferror(file) || found != (1U << G_N_ELEMENTS(names)) - 1 ||
++        !values[0] || values[1] > values[0]) {
++        fclose(file);
++        error_setg(errp, "incomplete /proc/meminfo");
++        return NULL;
++    }
++    fclose(file);
++    result = g_new0(GuestHyperMemoryStats, 1);
++    result->total_bytes = values[0];
++    result->available_bytes = values[1];
++    result->free_bytes = values[2];
++    result->buffers_bytes = values[3];
++    result->cached_bytes = values[4];
++    result->reclaimable_slab_bytes = values[5];
++    return result;
++}

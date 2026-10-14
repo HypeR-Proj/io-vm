@@ -149,8 +149,8 @@ python3 -B tools/publish.py --boot /path/to/verified-boot \
 instead of uploading. Publication must follow successful appliance integration
 checks; this tool alone cannot qualify a working backend.
 
-The corresponding-source tar.xz must contain the exact upstream Linux and
-BusyBox sources, module and service sources, resolved kernel/BusyBox configs,
+The corresponding-source tar.xz must contain the exact upstream Linux,
+BusyBox, QEMU, GLib, libffi, PCRE2 and zlib sources, module and service sources, resolved kernel/BusyBox configs,
 build/assembly scripts, source locks, and license texts for the shipped build.
 A URL list is insufficient. The source layer is part of the same immutable
 OCI manifest as the binaries; HypeR fetches only `Image` and `initramfs.cpio.gz`.
@@ -166,7 +166,9 @@ Project-authored `hyper_io.h` and `hyper_io_layout.h` offer Apache-2.0 OR
 GPL-2.0-only for their userspace and kernel consumers.
 Linux bridge modules in `modules/` are GPL-2.0-only; see
 [GPL-2.0](LICENSES/GPL-2.0-only.txt) and per-file SPDX headers. Linux and BusyBox
-retain their upstream licenses. Binary releases must carry matching source
+retain their upstream licenses. The separate QEMU guest-agent executable and
+its appliance extension are GPL-2.0-or-later; its static dependencies retain
+their upstream licenses. Binary releases must carry matching source
 materials and notices; the combined appliance is not Apache-only.
 
 ## Standby boot
@@ -396,6 +398,34 @@ serial port behind a root port that was present when this appliance booted.
 Linux discovers the function from a slot-change interrupt; it does not require
 a reboot or a manual PCI rescan.
 
-This kernel configuration does not create ports, change `console=ttyAMA0`, or
-start a QEMU guest-agent daemon. Device presentation and port access belong to
-the HypeR runtime; existing storage and network protocols remain unchanged.
+This kernel configuration does not create ports or change `console=ttyAMA0`.
+Device presentation and port access belong to the HypeR runtime; the agent
+supervisor below waits for its named port. Existing storage and network
+protocols remain unchanged.
+
+## Guest usage agent
+
+The I/O role starts the pinned upstream QEMU guest agent as a separate process.
+It discovers `org.qemu.guest_agent.0` by its sysfs port name, including when the
+virtio-serial controller appears after boot. Node numbers are not fixed. A lost
+port causes rediscovery; agent failure does not restart or stop storage/network
+backends. Userspace console selection and UART kernel diagnostics are unchanged.
+
+Only `guest-sync`, `guest-sync-delimited`, `guest-ping`, `guest-info`,
+`guest-get-cpustats`, and `guest-hyper-get-memory-stats` are enabled. File access,
+command execution, shutdown, freeze and other mutating RPCs are disabled. CPU
+statistics use the standard upstream command. The small appliance-specific memory
+command reads and closes `/proc/meminfo` in one request and returns bytes for
+MemTotal, MemAvailable, MemFree, Buffers, Cached and SReclaimable; it creates no
+remote file handles. It is a QGA extension, not a standard upstream command.
+
+`tools/guest_agent.py` builds a static AArch64 Linux agent using checksum-pinned
+sources and QEMU's bundled Python wheels. Its build dependencies include
+`python3-venv`, `ninja-build` and `pkg-config`. The appliance's existing archive
+size limits still apply. Matching dependency archives, patches and build scripts
+are included and checked in the corresponding-source package.
+
+Both platform builds run `tests/io-vm/guest-agent.py`: boot without a serial
+controller, hotplug it through PCIe, sample both CPUs and memory, reject unsafe
+RPCs and reconnect the host stream. HypeR's own integration tests cover its
+userspace device transport and read-only `vmm` observation path.
