@@ -1,0 +1,35 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+
+# devtmpfs supplies vport nodes; no udev or fixed PCI enumeration order is
+# required. Discovery and restart stay independent of storage supervision.
+set -eu
+agent_pid=
+stop() {
+    if [ -n "$agent_pid" ]; then
+        kill "$agent_pid" 2>/dev/null || true
+        wait "$agent_pid" 2>/dev/null || true
+    fi
+    exit 0
+}
+trap stop INT TERM
+mkdir -p /run/qemu-ga
+while :; do
+    for entry in /sys/class/virtio-ports/*; do
+        [ -f "$entry/name" ] || continue
+        read -r name < "$entry/name" || continue
+        [ "$name" = org.qemu.guest_agent.0 ] || continue
+        device=/dev/${entry##*/}
+        [ -c "$device" ] || continue
+        /usr/bin/qemu-ga --method=virtio-serial --path="$device" \
+            --statedir=/run/qemu-ga --pidfile=/run/qemu-ga/agent.pid \
+            --allow-rpcs=guest-sync,guest-sync-delimited,guest-ping,guest-info,guest-get-cpustats,guest-hyper-get-memory-stats &
+        agent_pid=$!
+        wait "$agent_pid" || true
+        agent_pid=
+        # Re-resolve the name after removal/rebind; the new node can differ.
+        break
+    done
+    sleep 1
+done

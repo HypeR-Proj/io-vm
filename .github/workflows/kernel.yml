@@ -50,7 +50,7 @@ jobs:
       - name: Install cross compiler and QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross bison flex bc libssl-dev libelf-dev kmod qemu-system-arm qemu-user device-tree-compiler
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross bison flex bc libssl-dev libelf-dev python3-venv ninja-build pkg-config kmod qemu-system-arm qemu-user device-tree-compiler
       - name: Check source and packaging contracts
         run: make test
       - name: Check control protocol and queue boundaries
@@ -108,6 +108,8 @@ jobs:
         run: python3 -B tests/io-vm/bringup.py --boot-index target/io-vm/${{ matrix.platform }}-boot.json --log target/io-vm/bringup.log
       - name: Verify virtio userspace console with separate UART kernel logs
         run: python3 -B tests/io-vm/bringup.py --boot-index target/io-vm/${{ matrix.platform }}-boot.json --console virtio --log target/io-vm/bringup-virtio.log
+      - name: Verify the restricted guest agent after serial hotplug
+        run: python3 -B tests/io-vm/guest-agent.py --boot-index target/io-vm/${{ matrix.platform }}-boot.json --log target/io-vm/guest-agent.log
       - name: Compile the AArch64 disk fixture
         run: aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror tests/io-vm/vhost-scsi.c -o target/io-vm/vhost-scsi-test
       - name: Compile the granule retirement regression module
@@ -146,6 +148,8 @@ jobs:
           path: |
             target/io-vm/acceptance.log
             target/io-vm/business.log
+            target/io-vm/guest-agent.log
+            target/io-vm/guest-agent.json
             target/io-vm/bringup.log
             target/io-vm/bringup-virtio.log
             target/io-vm/bringup-virtio.uart.log

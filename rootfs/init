@@ -49,6 +49,9 @@ case "$role" in io|business) ;; *) echo 'HypeR I/O: missing/invalid hyper.role';
 case "$mode:$role" in attached:io|attached:business|standby:io|bringup:io) ;;
     *) echo 'HypeR I/O: invalid deployment mode'; poweroff -f; exit 1 ;;
 esac
+if [ "$role" = io ]; then
+    /usr/bin/hyper-guest-agent &
+fi
 # Bring-up is explicitly diskless: do not probe/export disks or start a
 # backend which cannot serve requests. The VM remains under Native supervision.
 if [ "$mode" = bringup ]; then

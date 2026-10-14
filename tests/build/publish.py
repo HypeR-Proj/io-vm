@@ -46,6 +46,8 @@ class Publication(unittest.TestCase):
         self.source_entries['resolved/compiler.txt'] = b'compiler identity'
         self.source_entries['upstream/linux.tar.xz'] = b'locked linux test source'
         self.source_entries['upstream/busybox.tar.bz2'] = b'locked busybox test source'
+        for component in ('qemu', 'glib', 'libffi', 'pcre2', 'zlib'):
+            self.source_entries['upstream/' + component + '.tar.xz'] = component.encode()
         metadata.update(source_revision=self.revision, source_dirty=False,
             busybox_config_sha256=FIXTURE.ASSEMBLE.sha256(self.source_entries['resolved/busybox.config']),
             compiler_sha256=FIXTURE.ASSEMBLE.sha256(self.source_entries['resolved/compiler.txt']),
@@ -53,7 +55,8 @@ class Publication(unittest.TestCase):
                           for name in PUBLISH.REQUIRED_SOURCES},
             source_lock={name: {'url': 'https://example.invalid/' + filename,
                          'sha256': FIXTURE.ASSEMBLE.sha256(self.source_entries['upstream/' + filename])}
-                         for name, filename in [('linux', 'linux.tar.xz'), ('busybox', 'busybox.tar.bz2')]})
+                         for name, filename in [('linux', 'linux.tar.xz'), ('busybox', 'busybox.tar.bz2')]
+                         + [(name, name + '.tar.xz') for name in ('qemu', 'glib', 'libffi', 'pcre2', 'zlib')]})
         module_paths = ['include/hyper_io.h', 'include/hyper_io_layout.h', 'modules/guest-memory/Makefile',
                         'modules/guest-memory/memory.c', 'modules/guest-memory/granules.c',
                         'modules/guest-memory/granules.h', 'modules/io-bridge/Makefile',
