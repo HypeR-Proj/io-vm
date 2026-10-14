@@ -111,7 +111,7 @@ jobs:
       - name: Verify the restricted guest agent after serial hotplug
         run: python3 -B tests/io-vm/guest-agent.py --boot-index target/io-vm/${{ matrix.platform }}-boot.json --log target/io-vm/guest-agent.log
       - name: Compile the AArch64 disk fixture
-        run: aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror tests/io-vm/vhost-scsi.c -o target/io-vm/vhost-scsi-test
+        run: aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -I include tests/io-vm/vhost-scsi.c -o target/io-vm/vhost-scsi-test
       - name: Compile the granule retirement regression module
         run: |
           make -C target/io-vm/build/${{ matrix.platform }}/linux \

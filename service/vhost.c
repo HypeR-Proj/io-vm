@@ -146,6 +146,10 @@ int configure_vhost(struct backend *b, struct endpoint *endpoint,
 		backend_error(b, device, "open", -1);
 		return HYPER_IO_BACKEND_FAILURE;
 	}
+	if (endpoint == &b->disk &&
+	    vhost_ioctl(b, endpoint, device, HYPER_VHOST_SCSI_SET_RESOURCES,
+			"SET_RESOURCES", &b->scsi, -1))
+		return HYPER_IO_BACKEND_FAILURE;
 	if (vhost_ioctl(b, endpoint, device, VHOST_SET_OWNER, "SET_OWNER", NULL,
 			-1) ||
 	    vhost_ioctl(b, endpoint, device, VHOST_SET_FEATURES, "SET_FEATURES",
@@ -209,10 +213,17 @@ int activate_disk(struct backend *b, const struct hyper_io_activate *message)
 		return HYPER_IO_BUSY;
 	if (le64toh(message->features) != VERSION_1)
 		return HYPER_IO_INVALID;
+	/* The wire record retains its bounded six-slot layout. Unadvertised
+	 * queues must remain absent, including their reserved/address fields. */
+	for (unsigned i = b->scsi.request_queues + 2; i < HYPER_IO_QUEUES; ++i) {
+		const struct hyper_io_queue zero = {0};
+		if (memcmp(&message->queues[i], &zero, sizeof(zero)))
+			return HYPER_IO_INVALID;
+	}
 	int status =
 	    configure_vhost(b, &b->disk, "/dev/vhost-scsi",
 			    (uint32_t)le64toh(message->header.epoch), VERSION_1,
-			    message->queues, HYPER_IO_QUEUES, 3);
+			    message->queues, b->scsi.request_queues + 2, 3);
 	if (status == HYPER_IO_BUSY || status == HYPER_IO_INVALID)
 		return status;
 	if (status == HYPER_IO_OK &&

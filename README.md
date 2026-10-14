@@ -8,9 +8,9 @@ virtio-net guest networking backends. This repository
 owns Linux builds, external drivers, Linux-side services, complete initramfs
 assembly, tests, and GHCR package publication. HypeR owns Native apps and DTS.
 
-Linux is pinned to upstream **6.18.51 LTS** with a focused vhost work-queue
-ordering fix in `patches/linux/`. It prevents concurrent requeueing from
-losing work on AArch64; it changes neither virtio features nor device drivers.
+Linux is pinned to upstream **6.18.51 LTS** with focused changes in
+`patches/linux/`: vhost work-queue ordering prevents lost work on AArch64,
+and a per-instance vhost-scsi resource interface avoids oversized global defaults.
 The build records each patch hash and includes the patches in corresponding
 sources. Patch revisions use separate extracted source trees, so cached and
 concurrent builds cannot silently share different kernel source contents.
@@ -182,13 +182,27 @@ existing attached deployment and disk acceptance remain unchanged.
 
 ### Managed block devices
 
-HypeR supplies `/etc/hyper-clients.conf` with header `hyper.clients.v3` and
-`client-id network-name mac-address` lines. A missing network and MAC use `-`.
-The table includes exactly one `0 - -` entry for the Native block owner. Other
+HypeR supplies `/etc/hyper-clients.conf` with header `hyper.clients.v4` and
+`client-id network-name mac-address request-queues sg-prealloc` lines.
+Build manifests and OCI packages report client-table version 4 so consumers can
+reject an older appliance before constructing this deployment.
+A missing network and MAC use `-`. For example, `1 default 02:48:59:00:00:01 2 128`
+allocates two SCSI request queues and 128 scatterlist entries per request for
+client 1. Queue counts are 1–4; SG preallocation is 2–2048. The table includes
+exactly one owner entry, normally `0 - - 4 128`. The original v3 three-field
+format remains accepted with defaults of 4 queues and 128 SG entries. Other
 entries identify authorized transport slots; they contain no partition UUIDs,
 volume names or disk offsets. Storage-capable slots have a disk notification
 node in the HypeR-supplied DT; network-only slots do not. Network authorization
 and MAC validation are unchanged.
+
+Each service configures its own vhost-scsi file before `VHOST_SET_OWNER`.
+No sysfs/module parameter is changed. HELLO reports control/event plus the
+configured request queues; ACTIVATE still has six wire slots, and unused slots
+must be zero. Larger requests use Linux's chained scatterlist allocation instead
+of being rejected at the preallocation size. Reset/reopen preserves the supplied
+policy. Changing a board policy requires regenerating the HypeR deployment and
+restarting the appliance; live tuning is not supported.
 
 The owner enumerates physical block devices through control endpoint zero,
 reads their metadata into a bounded shared scratch buffer, and requests

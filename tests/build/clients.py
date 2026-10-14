@@ -26,6 +26,14 @@ class Clients(unittest.TestCase):
         path = Path(self.temp.name) / 'clients.conf'
         for content, good in [
             ('hyper.clients.v3\n0 - -\n1 - -\n', True),
+            ('hyper.clients.v4\n0 - - 4 128\n1 - - 1 32\n2 - - 4 2048\n', True),
+            ('hyper.clients.v4\n0 - - 4 128\n1 - - 0 128\n', False),
+            ('hyper.clients.v4\n0 - - 4 128\n1 - - 5 128\n', False),
+            ('hyper.clients.v4\n0 - - 4 128\n1 - - 4 1\n', False),
+            ('hyper.clients.v4\n0 - - 4 128\n1 - - 4 2049\n', False),
+            ('hyper.clients.v4\n0 - - 4 128\n1 - - -1 128\n', False),
+            ('hyper.clients.v4\n0 - - 4 128\n1 - - 4 128 extra\n', False),
+            ('hyper.clients.v4\n0 - - 4 128\n1 - -\n', False),
             ('hyper.clients.v3\n0 - -\n', True),
             ('hyper.clients.v3\n0 - -\n1 default 02:48:59:00:00:01\n', True),
             ('hyper.clients.v3\n0 - -\n0 - -\n', False),

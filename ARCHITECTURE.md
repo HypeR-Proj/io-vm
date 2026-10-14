@@ -18,7 +18,8 @@ unknown modules still fail. Disk acceptance checks both cases, loads the externa
 guest-memory module by name, and rejects target-core autoload failure messages.
 
 Linux uses the pinned 6.18.51 source from the 6.18 LTS series with the
-reviewed vhost work-ordering fix under `patches/linux`. `sources.lock.json`
+reviewed vhost work-ordering fix and per-instance SCSI resource configuration
+under `patches/linux`. `sources.lock.json`
 pins archive checksums. Hyper-specific drivers remain external modules built
 against that exact kernel.
 
@@ -225,7 +226,8 @@ cache maintenance, interrupt ordering, device reset, and measured image sizes.
 ## Four-request-queue bridge generation
 
 Bridge protocol version 3 retains six queue records in its 240-byte ACTIVATE
-message: control, event, and four request queues. HELLO advertises six queues.
+message: control, event, and up to four request queues. HELLO advertises the
+per-client capacity (3–6 total queues), as configured by HypeR's client table.
 The first three queues are mandatory; optional request queues use all-zero
 records when a driver does not configure them. Each configured queue has its
 own kick/call eventfds. RESET and STOP_QUEUE still clear the entire vhost
@@ -234,6 +236,19 @@ Earlier protocol versions are rejected; HypeR must adopt the matching immutable 
 The Linux acceptance fixture exercises all four request queues against its
 real QEMU block device. Cross-VM qualification additionally checks batched
 requests, notification delivery and retirement in HypeR.
+
+The appliance-local `VHOST_SCSI_SET_RESOURCES` ioctl configures request queue
+capacity and SG preallocation on one open file. Its 16-byte record contains
+four native-endian u32 words: queue count, SG count, and two zero reserved words.
+`VHOST_SCSI_GET_RESOURCES` returns that record. Both use Linux ioctl type 0xaf,
+number 0x4f, with WRITE and READ direction respectively; they are not upstream
+Linux interfaces and never cross the HypeR control mailbox. Features/ABI queries
+do not allocate queues. The first stateful ioctl constructs the device and
+freezes its configuration, including across owner reset. A per-file mutex
+serializes configuration and construction, and failed construction publishes no
+device. Final close runs the existing vhost drain/cleanup before freeing it.
+Clients using only upstream ioctls retain the module defaults. The service
+always installs its HypeR-selected resource policy before acquiring ownership.
 
 
 ## Shared memory with independent device lifecycles

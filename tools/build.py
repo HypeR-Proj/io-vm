@@ -228,7 +228,7 @@ def main():
     for name in ("Makefile", "tools/build.py", "tools/guest_agent.py", "scripts/assemble-io-vm.py", "rootfs/init", "rootfs/usr/bin/hyper-guest-agent",
                  "service/hyper-io-service.c", "service/backend.h", "service/memory.c",
                  "service/vhost.c", "service/network.c", "service/network-config.c",
-                 "service/hyper-networks.c", "include/hyper_network.h", "service/block.c", "service/block-target.c", "service/block.h", "service/client-config.c", "include/hyper_clients.h", "include/hyper_block_policy.h", "service/hyper-io-supervisor.c", "include/hyper_io_session.h", "include/hyper_io_layout.h", "tests/io-vm/business-disk.c", "sources.lock.json",
+                 "service/hyper-networks.c", "include/hyper_network.h", "service/block.c", "service/block-target.c", "service/block.h", "service/client-config.c", "include/hyper_clients.h", "include/hyper_scsi_resources.h", "include/hyper_block_policy.h", "service/hyper-io-supervisor.c", "include/hyper_io_session.h", "include/hyper_io_layout.h", "tests/io-vm/business-disk.c", "sources.lock.json",
                  "configs/linux-aarch64.config", "configs/busybox.config", "LICENSE", "LICENSES/GPL-2.0-only.txt"):
         input_hashes[name] = digest(ROOT / name)
     input_hashes.update({str(fix.relative_to(ROOT)): digest(fix)
@@ -324,6 +324,7 @@ def main():
         if len(base) > 8 * ARCHIVE.MIB:
             raise ValueError("base ramdisk exceeds compressed size budget")
         manifest = {"format": 1, "architecture": "aarch64", "platform": args.platform,
+                    "client_table_version": 4,
                     "kernel_release": release, "source_lock": lock,
                     "source_revision": source_revision, "source_dirty": source_dirty,
                     "build_timestamp": timestamp,

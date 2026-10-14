@@ -1,0 +1,184 @@
+Subject: [PATCH] vhost-scsi: configure resource sizing per open instance
+
+Keep queue and scatterlist policy per file. Allocate only after configuration
+and reject changes after initialization. Feature probing stays allocation-free;
+legacy clients retain the module defaults. This appliance-local ioctl is not
+an upstream Linux UAPI.
+
+--- a/drivers/vhost/scsi.c
++++ b/drivers/vhost/scsi.c
+@@ -2289,17 +2289,17 @@
+ 	return 0;
+ }
+ 
+-static int vhost_scsi_open(struct inode *inode, struct file *f)
++static struct vhost_scsi *vhost_scsi_alloc(unsigned int nvqs, unsigned int sg_cnt)
+ {
+ 	struct vhost_scsi_virtqueue *svq;
+ 	struct vhost_scsi *vs;
+ 	struct vhost_virtqueue **vqs;
+-	int r = -ENOMEM, i, nvqs = vhost_scsi_max_io_vqs;
++	int i;
+ 
+ 	vs = kvzalloc(sizeof(*vs), GFP_KERNEL);
+ 	if (!vs)
+ 		goto err_vs;
+-	vs->inline_sg_cnt = vhost_scsi_inline_sg_cnt;
++	vs->inline_sg_cnt = sg_cnt;
+ 
+ 	if (nvqs > VHOST_SCSI_MAX_IO_VQ) {
+ 		pr_err("Invalid max_io_vqs of %d. Using %d.\n", nvqs,
+@@ -2349,8 +2349,7 @@
+ 
+ 	vhost_scsi_init_inflight(vs, NULL);
+ 
+-	f->private_data = vs;
+-	return 0;
++	return vs;
+ 
+ err_local_vqs:
+ 	kfree(vs->vqs);
+@@ -2359,12 +2358,11 @@
+ err_inflight:
+ 	kvfree(vs);
+ err_vs:
+-	return r;
+-}
+-
+-static int vhost_scsi_release(struct inode *inode, struct file *f)
+-{
+-	struct vhost_scsi *vs = f->private_data;
++	return ERR_PTR(-ENOMEM);
++}
++
++static void vhost_scsi_free(struct vhost_scsi *vs)
++{
+ 	struct vhost_scsi_target t;
+ 
+ 	mutex_lock(&vs->dev.mutex);
+@@ -2377,15 +2375,13 @@
+ 	kfree(vs->vqs);
+ 	kfree(vs->old_inflight);
+ 	kvfree(vs);
+-	return 0;
+ }
+ 
+ static long
+-vhost_scsi_ioctl(struct file *f,
++vhost_scsi_dev_ioctl(struct vhost_scsi *vs,
+ 		 unsigned int ioctl,
+ 		 unsigned long arg)
+ {
+-	struct vhost_scsi *vs = f->private_data;
+ 	struct vhost_scsi_target backend;
+ 	void __user *argp = (void __user *)arg;
+ 	u64 __user *featurep = argp;
+@@ -2456,6 +2452,108 @@
+ 	}
+ }
+ 
++
++/* Appliance-local ABI. The HypeR supervisor supplies one configuration per fd;
++ * module parameters remain defaults for clients using the upstream ABI only.
++ * Freeze before the first stateful ioctl so reset cannot change ring identity.
++ */
++struct vhost_scsi_resources {
++	__u32 request_queues;
++	__u32 sg_prealloc;
++	__u32 reserved[2];
++};
++#define VHOST_SCSI_SET_RESOURCES _IOW(VHOST_VIRTIO, 0x4f, struct vhost_scsi_resources)
++#define VHOST_SCSI_GET_RESOURCES _IOR(VHOST_VIRTIO, 0x4f, struct vhost_scsi_resources)
++
++struct vhost_scsi_file {
++	struct mutex lock;
++	struct vhost_scsi *device;
++	struct vhost_scsi_resources resources;
++};
++
++static int vhost_scsi_open(struct inode *inode, struct file *f)
++{
++	struct vhost_scsi_file *file = kzalloc(sizeof(*file), GFP_KERNEL);
++
++	if (!file)
++		return -ENOMEM;
++	mutex_init(&file->lock);
++	file->resources.request_queues = clamp_t(unsigned int,
++			READ_ONCE(vhost_scsi_max_io_vqs), 1, VHOST_SCSI_MAX_IO_VQ);
++	file->resources.sg_prealloc = READ_ONCE(vhost_scsi_inline_sg_cnt);
++	f->private_data = file;
++	return 0;
++}
++
++static int vhost_scsi_release(struct inode *inode, struct file *f)
++{
++	struct vhost_scsi_file *file = f->private_data;
++
++	/* Final file release cannot race an ioctl holding a file reference. */
++	if (file->device)
++		vhost_scsi_free(file->device);
++	kfree(file);
++	return 0;
++}
++
++static long vhost_scsi_ioctl(struct file *f, unsigned int command, unsigned long arg)
++{
++	struct vhost_scsi_file *file = f->private_data;
++	struct vhost_scsi_resources resources;
++	void __user *argp = (void __user *)arg;
++	u64 features = VHOST_SCSI_FEATURES;
++	int abi = VHOST_SCSI_ABI_VERSION;
++	long ret = 0;
++
++	/* Feature probing must neither allocate queue storage nor freeze policy. */
++	if (command == VHOST_GET_FEATURES)
++		return copy_to_user(argp, &features, sizeof(features)) ? -EFAULT : 0;
++	if (command == VHOST_SCSI_GET_ABI_VERSION)
++		return copy_to_user(argp, &abi, sizeof(abi)) ? -EFAULT : 0;
++	mutex_lock(&file->lock);
++	if (command == VHOST_SCSI_GET_RESOURCES) {
++		ret = copy_to_user(argp, &file->resources, sizeof(resources)) ? -EFAULT : 0;
++		goto out;
++	}
++	if (command == VHOST_SCSI_SET_RESOURCES) {
++		if (file->device) {
++			ret = -EBUSY;
++			goto out;
++		}
++		if (copy_from_user(&resources, argp, sizeof(resources))) {
++			ret = -EFAULT;
++			goto out;
++		}
++		if (!resources.request_queues || resources.request_queues > VHOST_SCSI_MAX_IO_VQ ||
++		    resources.sg_prealloc == 1 || resources.sg_prealloc > VHOST_SCSI_PREALLOC_SGLS ||
++		    resources.reserved[0] || resources.reserved[1]) {
++			ret = -EINVAL;
++			goto out;
++		}
++#ifdef CONFIG_ARCH_NO_SG_CHAIN
++		if (resources.sg_prealloc != VHOST_SCSI_PREALLOC_SGLS) {
++			ret = -EOPNOTSUPP;
++			goto out;
++		}
++#endif
++		file->resources = resources;
++		goto out;
++	}
++	if (!file->device) {
++		struct vhost_scsi *device = vhost_scsi_alloc(file->resources.request_queues,
++							 file->resources.sg_prealloc);
++		if (IS_ERR(device)) {
++			ret = PTR_ERR(device);
++			goto out;
++		}
++		file->device = device;
++	}
++	ret = vhost_scsi_dev_ioctl(file->device, command, arg);
++out:
++	mutex_unlock(&file->lock);
++	return ret;
++}
++
+ static const struct file_operations vhost_scsi_fops = {
+ 	.owner          = THIS_MODULE,
+ 	.release        = vhost_scsi_release,

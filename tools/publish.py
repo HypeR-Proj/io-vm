@@ -32,6 +32,8 @@ REQUIRED_SOURCES = {
     'modules/io-bridge/hyper_io_bridge.c', 'service/hyper-io-service.c',
     'tests/io-vm/business-disk.c', 'sources.lock.json',
     'patches/linux/0001-vhost-order-work-node-reuse.patch',
+    'patches/linux/0002-vhost-scsi-per-instance-resources.patch',
+    'include/hyper_scsi_resources.h',
     'configs/linux-aarch64.config', 'configs/busybox.config', 'LICENSE', 'LICENSES/GPL-2.0-only.txt',
 }
 
@@ -168,6 +170,7 @@ def main():
         command = [args.oras, 'push', '--artifact-type', 'application/vnd.hyper.io-vm.v1',
                    '--annotation', 'org.hyper.architecture=aarch64',
                    '--annotation', 'org.hyper.platform=' + metadata['platform'],
+                   '--annotation', 'org.hyper.client-table-version=' + str(metadata.get('client_table_version', 3)),
                    '--annotation', 'org.hyper.supported-platforms=' + json.dumps(
                        supported_platforms(metadata, (staging / 'kernel.config').read_bytes()),
                        separators=(',', ':')),
