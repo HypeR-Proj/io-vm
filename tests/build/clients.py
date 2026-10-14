@@ -13,9 +13,13 @@ class Clients(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory()
         cls.binary = Path(cls.temp.name) / 'parser'
         source = Path(cls.temp.name) / 'clients.c'
-        source.write_text('#include "hyper_clients.h"\n'
+        source.write_text('#include "hyper_clients.h"\n#include <stdio.h>\n'
                           'int main(int argc, char **argv) { struct hyper_client clients[HYPER_BLOCK_CLIENTS]; '
-                          'unsigned count; return argc != 2 || hyper_clients_read(argv[1], clients, &count); }\n')
+                          'unsigned count; if (argc != 2 || hyper_clients_read(argv[1], clients, &count)) return 1; '
+                          'for (unsigned i = 0; i < count; ++i) '
+                          'printf("%u %u %u %u %u\\n", clients[i].id, clients[i].request_queues, '
+                          'clients[i].sg_prealloc, clients[i].net_resources.rx_backlog_packets, '
+                          'clients[i].net_resources.tx_buffer_bytes); return 0; }\n')
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror',
                         '-I', str(ROOT / 'include'), str(source), str(ROOT / 'service/client-config.c'),
                         '-o', str(cls.binary)], check=True)
@@ -50,7 +54,38 @@ class Clients(unittest.TestCase):
         ]:
             with self.subTest(content=content):
                 path.write_text(content)
-                self.assertEqual(subprocess.run([str(self.binary), str(path)]).returncode == 0, good)
+                self.assertEqual(subprocess.run([str(self.binary), str(path)],
+                                               capture_output=True).returncode == 0, good)
+
+    def test_network_resources_and_legacy_defaults(self):
+        path = Path(self.temp.name) / 'clients.conf'
+        for content, expected in [
+            ('hyper.clients.v3\n0 - -\n1 default 02:48:59:00:00:01\n',
+             '0 4 128 1000 0\n1 4 128 1000 0\n'),
+            ('hyper.clients.v4\n0 - - 4 128\n1 default 02:48:59:00:00:01 1 32\n',
+             '0 4 128 1000 0\n1 1 32 1000 0\n'),
+            ('hyper.clients.v5\n0 - - 4 128 1000 0\n'
+             '1 default 02:48:59:00:00:01 1 32 256 1048576\n'
+             '2 default 02:48:59:00:00:02 4 128 1000 0\n',
+             '0 4 128 1000 0\n1 1 32 256 1048576\n2 4 128 1000 0\n'),
+        ]:
+            path.write_text(content)
+            result = subprocess.run([str(self.binary), str(path)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, expected)
+        for policy, good in [
+            ('1 0', True), ('65536 65536', True), ('1000 2147483647', True),
+            ('0 0', False), ('65537 0', False), ('-1 0', False), ('+1 0', False),
+            ('1000 1', False), ('1000 65535', False), ('1000 -1', False),
+            ('1000 +65536', False), ('1000 2147483648', False), ('1000 4294967296', False),
+            ('1000 99999999999', False), ('1000 1.5', False), ('1000 0x10000', False),
+            ('1000', False), ('1000 0 extra', False),
+        ]:
+            with self.subTest(policy=policy):
+                path.write_text('hyper.clients.v5\n0 - - 4 128 1000 0\n'
+                                f'1 default 02:48:59:00:00:01 4 128 {policy}\n')
+                result = subprocess.run([str(self.binary), str(path)], capture_output=True)
+                self.assertEqual(result.returncode == 0, good)
     def test_block_ranges(self):
         binary = Path(self.temp.name) / 'block-policy'
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror',

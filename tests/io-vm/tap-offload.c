@@ -6,6 +6,7 @@
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <net/if.h>
 
 #include <linux/if_tun.h>
@@ -179,6 +180,27 @@ int main(void)
 	strcpy(bridge.ifr_name, "offload-test");
 	assert(!ioctl(control, SIOCSIFFLAGS, &bridge));
 	int tx = tap(control, "offload-tx"), rx = tap(control, "offload-rx");
+	for (int ipv6 = 0; ipv6 <= 1; ++ipv6)
+		for (int segmented = 0; segmented <= 1; ++segmented)
+			transfer(tx, rx, ipv6, segmented);
+	/* Resource controls are per TAP and preserve checksum/GSO semantics. */
+	int bytes = 0;
+	assert(!ioctl(tx, TUNGETSNDBUF, &bytes) && bytes == INT_MAX);
+	bytes = 1048576;
+	assert(!ioctl(tx, TUNSETSNDBUF, &bytes));
+	bytes = 0;
+	assert(!ioctl(tx, TUNGETSNDBUF, &bytes) && bytes == 1048576);
+	assert(!ioctl(rx, TUNGETSNDBUF, &bytes) && bytes == INT_MAX);
+	struct ifreq queue = {0};
+	strcpy(queue.ifr_name, "offload-rx");
+	assert(!ioctl(control, SIOCGIFTXQLEN, &queue));
+	printf("TAP default RX backlog: %d packets\n", queue.ifr_qlen);
+	assert(queue.ifr_qlen == 1000);
+	queue.ifr_qlen = 256;
+	assert(!ioctl(control, SIOCSIFTXQLEN, &queue));
+	assert(!ioctl(control, SIOCGIFTXQLEN, &queue) && queue.ifr_qlen == 256);
+	strcpy(queue.ifr_name, "offload-tx");
+	assert(!ioctl(control, SIOCGIFTXQLEN, &queue) && queue.ifr_qlen == 1000);
 	for (int ipv6 = 0; ipv6 <= 1; ++ipv6)
 		for (int segmented = 0; segmented <= 1; ++segmented)
 			transfer(tx, rx, ipv6, segmented);

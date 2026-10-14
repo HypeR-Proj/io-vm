@@ -23,6 +23,7 @@ enum { TAP_FD = 40, CONTROL_FD, VHOST_FD };
 static int tap_open, control_open, vhost_open, drains, attaches;
 static unsigned long fail_ioctl;
 static int fail_attach = -1, configure_status = HYPER_IO_OK;
+static unsigned rx_backlog, tx_buffer, tx_settings;
 
 static int network_open(const char *path, int flags, ...)
 {
@@ -76,10 +77,21 @@ static int network_ioctl(int fd, unsigned long command, ...)
 		case TUNSETVNETLE:
 			assert(fd == TAP_FD && *(int *)argument == 1);
 			break;
+		case TUNSETSNDBUF:
+			assert(fd == TAP_FD && !attaches);
+			tx_buffer = *(int *)argument;
+			++tx_settings;
+			break;
+		case SIOCSIFTXQLEN:
+			assert(fd == CONTROL_FD && !attaches);
+			assert(!strcmp(((struct ifreq *)argument)->ifr_name, "htap-test"));
+			rx_backlog = ((struct ifreq *)argument)->ifr_qlen;
+			break;
 		case SIOCBRADDIF: {
 			struct ifreq *bridge = argument;
 			assert(fd == CONTROL_FD && bridge->ifr_ifindex == 7);
 			assert(!strcmp(bridge->ifr_name, "hbr0"));
+			assert(rx_backlog);
 			break;
 		}
 		case SIOCGIFFLAGS:
@@ -166,8 +178,10 @@ static struct backend idle(void)
 {
 	assert(!tap_open && !control_open && !vhost_open);
 	drains = attaches = 0;
+	rx_backlog = tx_buffer = tx_settings = 0;
 	struct backend b = {
-	    .network = 1, .tap = -1, .net = {.fd = -1}, .disk = {.fd = 99}};
+	    .network = 1, .tap = -1, .net = {.fd = -1}, .disk = {.fd = 99},
+	    .net_resources = {.rx_backlog_packets = HYPER_NET_RX_BACKLOG_PACKETS}};
 	strcpy(b.bridge, "hbr0");
 	return b;
 }
@@ -185,15 +199,16 @@ int main(void)
 	    .features = htole64(NETWORK_FEATURES)};
 	const unsigned long stages[] = {
 	    TUNSETIFF,	 TUNSETVNETHDRSZ, TUNSETVNETLE, TUNSETOFFLOAD,
-	    SIOCBRADDIF, SIOCGIFFLAGS,	  SIOCSIFFLAGS};
+	    TUNSETSNDBUF, SIOCSIFTXQLEN, SIOCBRADDIF, SIOCGIFFLAGS, SIOCSIFFLAGS};
 	for (unsigned i = 0; i < sizeof(stages) / sizeof(stages[0]); ++i) {
 		struct backend b = idle();
+		b.net_resources.tx_buffer_bytes = 1048576;
 		fail_ioctl = stages[i];
 		assert(activate_network(&b, &request) ==
 		       HYPER_IO_BACKEND_FAILURE);
 		assert(!attaches && !drains);
 		retired(&b);
-		if (i < 4) {
+		if (i < 5) {
 			assert(probe_network(&b) == -1);
 			retired(&b);
 		}
@@ -227,10 +242,27 @@ int main(void)
 		assert(activate_network(&b, &request) == HYPER_IO_OK);
 		assert(attaches == 2 && b.net.attached && tap_open &&
 		       vhost_open);
+		assert(rx_backlog == 1000 && !tx_settings);
 		assert(activate_network(&b, &request) == HYPER_IO_BUSY);
 		assert(!quiesce_network(&b) && drains == 1);
 		retired(&b);
 	}
+	/* Each activation (including reset/rebind) reapplies this client's policy. */
+	b = idle();
+	b.net_resources = (struct hyper_network_resources){256, 1048576};
+	for (unsigned i = 0; i < 2; ++i) {
+		attaches = 0;
+		assert(activate_network(&b, &request) == HYPER_IO_OK);
+		assert(rx_backlog == 256 && tx_buffer == 1048576 && tx_settings == i + 1);
+		assert(!quiesce_network(&b));
+		retired(&b);
+	}
+	/* A new client still receives defaults, not the preceding client's cap. */
+	b = idle();
+	assert(activate_network(&b, &request) == HYPER_IO_OK);
+	assert(rx_backlog == 1000 && !tx_settings);
+	assert(!quiesce_network(&b));
+	retired(&b);
 	const uint64_t invalid[] = {
 	    0, NETWORK_CSUM, VERSION_1 | NETWORK_TSO,
 	    NETWORK_FEATURES | (UINT64_C(1) << VIRTIO_NET_F_GUEST_CSUM)};

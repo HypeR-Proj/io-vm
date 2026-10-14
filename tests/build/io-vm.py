@@ -139,7 +139,7 @@ class Assembly(unittest.TestCase):
         (base / "Image").write_bytes(kernel)
         archive = ASSEMBLE.encode_newc({"bin": directory(), "bin/sh": regular(b"shell", 0o755)}, 4096)
         (base / "base.cpio.gz").write_bytes(gzip.compress(archive, mtime=0))
-        manifest = {"format": 1, "architecture": "aarch64", "client_table_version": 4, "files": {}}
+        manifest = {"format": 1, "architecture": "aarch64", "client_table_version": 5, "files": {}}
         for name in ("Image", "base.cpio.gz"):
             data = (base / name).read_bytes()
             manifest["files"][name] = {"size": len(data), "sha256": ASSEMBLE.sha256(data)}
@@ -154,7 +154,7 @@ class Assembly(unittest.TestCase):
     def test_immutable_reproducible_assembly_and_overlay_update(self):
         before = {p.name: p.read_bytes() for p in self.args.base.iterdir()}
         result = ASSEMBLE.assemble(self.args)
-        self.assertEqual(result['client_table_version'], 4)
+        self.assertEqual(result['client_table_version'], 5)
         path = self.args.output / result["initramfs"]
         timestamp = path.stat().st_mtime_ns
         self.assertEqual(ASSEMBLE.assemble(self.args), result)

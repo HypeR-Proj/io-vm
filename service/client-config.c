@@ -30,22 +30,35 @@ int hyper_clients_read(const char *path,
 		return -1;
 	if (!fgets(line, sizeof(line), file))
 		goto invalid;
-	int resources = !strcmp(line, "hyper.clients.v4\n");
+	int net_resources = !strcmp(line, "hyper.clients.v5\n");
+	int resources = net_resources || !strcmp(line, "hyper.clients.v4\n");
 	if (!resources && strcmp(line, "hyper.clients.v3\n"))
 		goto invalid;
 	while (fgets(line, sizeof(line), file)) {
-		char id[8], queues[8], sg[8], extra;
+		char id[8], queues[8], sg[8], rx[12], tx[12], extra;
 		if (n == HYPER_BLOCK_CLIENTS || !strchr(line, '\n'))
 			goto invalid;
-		int fields = resources ?
-			sscanf(line, "%7s %31s %17s %7s %7s %c", id,
-			       clients[n].network, clients[n].mac, queues, sg, &extra) :
-			sscanf(line, "%7s %31s %17s %c", id,
-			       clients[n].network, clients[n].mac, &extra);
-		if (fields != (resources ? 5 : 3))
+		int fields;
+		if (net_resources)
+			fields = sscanf(line, "%7s %31s %17s %7s %7s %11s %11s %c",
+					id, clients[n].network, clients[n].mac,
+					queues, sg, rx, tx, &extra);
+		else if (resources)
+			fields = sscanf(line, "%7s %31s %17s %7s %7s %c", id,
+					clients[n].network, clients[n].mac,
+					queues, sg, &extra);
+		else
+			fields = sscanf(line, "%7s %31s %17s %c", id,
+					clients[n].network, clients[n].mac, &extra);
+		if (fields != (net_resources ? 7 : resources ? 5 : 3))
 			goto invalid;
 		clients[n].request_queues = HYPER_SCSI_REQUEST_QUEUES;
 		clients[n].sg_prealloc = HYPER_SCSI_SG_PREALLOC;
+		clients[n].net_resources = (struct hyper_network_resources){
+			.rx_backlog_packets = HYPER_NET_RX_BACKLOG_PACKETS};
+		if (net_resources && hyper_network_resources_parse(
+			    rx, tx, &clients[n].net_resources))
+			goto invalid;
 		if (resources) {
 			for (const char *p = queues; *p; ++p)
 				if (!isdigit((unsigned char)*p))
