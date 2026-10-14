@@ -324,7 +324,7 @@ def main():
         if len(base) > 8 * ARCHIVE.MIB:
             raise ValueError("base ramdisk exceeds compressed size budget")
         manifest = {"format": 1, "architecture": "aarch64", "platform": args.platform,
-                    "client_table_version": 4,
+                    "client_table_version": 5,
                     "kernel_release": release, "source_lock": lock,
                     "source_revision": source_revision, "source_dirty": source_dirty,
                     "build_timestamp": timestamp,

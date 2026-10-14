@@ -59,13 +59,22 @@ static int open_tap(struct backend *b, struct ifreq *tap)
 		backend_error(b, tap->ifr_name, "virtio header configuration", -1);
 		return -1;
 	}
+	/* A finite budget disables some Linux vhost/TAP batching fast paths.
+	 * Preserve the unlimited default unless HypeR explicitly requests a cap. */
+	if (b->net_resources.tx_buffer_bytes) {
+		int bytes = (int)b->net_resources.tx_buffer_bytes;
+		if (ioctl(b->tap, TUNSETSNDBUF, &bytes)) {
+			backend_error(b, tap->ifr_name, "TUNSETSNDBUF", -1);
+			return -1;
+		}
+	}
 	return 0;
 }
 
 int probe_network(struct backend *b)
 {
-	/* Verify the complete TAP contract before HELLO advertises offloads. The
-	 * probe is never attached to a bridge and has no packet producers. */
+	/* Verify headers and TX budget support before HELLO advertises offloads.
+	 * RX backlog is set during activation, before bridge attachment. */
 	struct ifreq tap;
 	int result = open_tap(b, &tap);
 	if (b->tap >= 0) {
@@ -92,7 +101,15 @@ static int create_tap(struct backend *b)
 	}
 	struct ifreq bridge = {.ifr_ifindex = (int)index};
 	memcpy(bridge.ifr_name, b->bridge, sizeof(bridge.ifr_name));
-	int result = ioctl(socket_fd, SIOCBRADDIF, &bridge);
+	/* Linux calls this TAP's TX queue, but it holds packets headed to guest RX.
+	 * Resize before bridge attachment, while no producer can enqueue packets. */
+	tap.ifr_qlen = (int)b->net_resources.rx_backlog_packets;
+	int result = ioctl(socket_fd, SIOCSIFTXQLEN, &tap);
+	if (result) {
+		backend_error(b, tap.ifr_name, "SIOCSIFTXQLEN", -1);
+		goto out;
+	}
+	result = ioctl(socket_fd, SIOCBRADDIF, &bridge);
 	if (result) {
 		backend_error(b, b->bridge, "SIOCBRADDIF", -1);
 		goto out;

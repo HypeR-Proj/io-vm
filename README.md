@@ -182,16 +182,19 @@ existing attached deployment and disk acceptance remain unchanged.
 
 ### Managed block devices
 
-HypeR supplies `/etc/hyper-clients.conf` with header `hyper.clients.v4` and
-`client-id network-name mac-address request-queues sg-prealloc` lines.
-Build manifests and OCI packages report client-table version 4 so consumers can
-reject an older appliance before constructing this deployment.
-A missing network and MAC use `-`. For example, `1 default 02:48:59:00:00:01 2 128`
+HypeR supplies `/etc/hyper-clients.conf` with header `hyper.clients.v5` and
+`client-id network-name mac-address request-queues sg-prealloc rx-backlog-packets tx-buffer-bytes`
+lines. Build manifests and OCI packages report client-table version 5 so
+consumers can reject an older appliance before constructing this deployment.
+A missing network and MAC use `-`. For example,
+`1 default 02:48:59:00:00:01 2 128 1000 0`
 allocates two SCSI request queues and 128 scatterlist entries per request for
 client 1. Queue counts are 1–4; SG preallocation is 2–2048. The table includes
-exactly one owner entry, normally `0 - - 4 128`. The original v3 three-field
-format remains accepted with defaults of 4 queues and 128 SG entries. Other
-entries identify authorized transport slots; they contain no partition UUIDs,
+exactly one owner entry, normally `0 - - 4 128 1000 0`. The original v3 three-field
+format remains accepted with defaults of 4 queues and 128 SG entries, as does
+the v4 five-field format with explicit SCSI policy. Both default to 1000 RX
+backlog packets and unlimited TX buffering. Other entries identify authorized
+transport slots; they contain no partition UUIDs,
 volume names or disk offsets. Storage-capable slots have a disk notification
 node in the HypeR-supplied DT; network-only slots do not. Network authorization
 and MAC validation are unchanged.
@@ -377,6 +380,22 @@ buffers, control queues and multiqueue are not offered. The MTU is 1500 and each
 of the two queues remains limited to 128 descriptors. This is a shared Ethernet
 segment, not a network isolation or anti-spoofing policy.
 
+Each client's `rx-backlog-packets` sets the TAP queue length before bridge
+attachment. This is traffic headed to guest RX, although Linux names it TAP TX.
+The supported range is 1–65536 packets; the default remains 1000. The optional
+`tx-buffer-bytes` policy controls guest TX through `TUNSETSNDBUF`: zero preserves
+Linux's unlimited default; nonzero values must be 65536–2147483647 bytes. It
+counts socket-owned allocation overhead, not just payload, and an allocation can
+exceed the threshold. These settings do not cap all per-VM network memory:
+bridge, physical queues and other networking allocations remain shared.
+
+Finite TX budgets below `INT_MAX` disable some batching fast paths in the pinned
+Linux vhost/TAP implementation and may cost CPU or throughput. They do not change
+CSUM/TSO negotiation. Policy remains with HypeR; no global network parameters are
+changed. Network reset/rebind reapplies the same client policy. Configuration
+failure aborts activation and uses the normal drain/cleanup path instead of
+silently falling back to defaults.
+
 TAP uses `IFF_VNET_HDR` with the modern 12-byte, little-endian virtio header,
 even without mergeable RX buffers. Its configuration is probed before HELLO
 and checked again before attaching either vhost queue. vhost's private
@@ -387,12 +406,14 @@ does not provide hardware offload. `TUNSETOFFLOAD` remains zero because it
 controls Linux-to-guest traffic: guest RX must still receive completed checksums
 and ordinary MTU-sized frames. The control protocol layout remains version 3.
 
-Linux-side tests cover feature dependency rejection, TAP setup failures and
-partial queue attachment rollback. A fixture on each pinned kernel profile
-bridges two TAPs with receive offloads disabled, checking TCPv4/TCPv6 checksum
+Linux-side tests cover feature dependency rejection, TAP resource configuration,
+reset/rebind, setup failures and partial queue attachment rollback. A fixture on
+each pinned kernel profile bridges two TAPs with receive offloads disabled,
+checking TCPv4/TCPv6 checksum
 completion, segmentation sizes, sequence numbers and payload bytes, plus malformed
-GSO rejection. HypeR's cross-VM acceptance additionally verifies bidirectional
-HTTP payloads, reset/rebind and stop/start. These tests have no performance
+GSO rejection under default and finite TX budgets. It also checks per-TAP policy
+isolation and RX queue resizing. HypeR's cross-VM acceptance additionally verifies
+bidirectional HTTP payloads, reset/rebind and stop/start. These tests have no performance
 thresholds.
 
 Device reset drains only that device. `RELEASE_MEMORY` drains both devices before
