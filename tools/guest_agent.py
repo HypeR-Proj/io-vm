@@ -36,7 +36,7 @@ def build(sources, output, cross, jobs, run):
     prefix.mkdir(exist_ok=True)
     env = dict(os.environ, CC=cross + "gcc", AR=cross + "ar", RANLIB=cross + "ranlib",
                CFLAGS="-O2 -g0", PKG_CONFIG_LIBDIR=str(prefix / "lib/pkgconfig"),
-               PKG_CONFIG_PATH="", LC_ALL="C")
+               PKG_CONFIG_PATH="", PKG_CONFIG="pkg-config", LC_ALL="C")
     host = subprocess.check_output([cross + "gcc", "-dumpmachine"], text=True).strip()
     if host not in ("aarch64-linux-gnu", "aarch64-unknown-linux-gnu"):
         raise ValueError("guest agent requires an AArch64 Linux compiler")
