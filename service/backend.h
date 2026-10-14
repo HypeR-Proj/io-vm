@@ -3,6 +3,7 @@
 #ifndef HYPER_BACKEND_H
 #define HYPER_BACKEND_H
 #include "hyper_io.h"
+#include "hyper_scsi_resources.h"
 #include <linux/vhost.h>
 #include <linux/virtio_net.h>
 #include <stdint.h>
@@ -32,6 +33,7 @@ struct backend {
 	unsigned char mac[6];
 	uint64_t token;
 	unsigned diagnostics;
+	struct hyper_scsi_resources scsi;
 	struct block_owner *blocks;
 };
 static inline struct endpoint *memory_endpoint(struct backend *b)

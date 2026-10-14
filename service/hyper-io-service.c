@@ -139,7 +139,7 @@ static uint32_t dispatch(struct backend *b, struct hyper_io_session *session,
 		response->common.features = htole64(
 		    operation == HYPER_IO_HELLO ? VERSION_1 : NETWORK_FEATURES);
 		response->common.queues = htole32(
-		    operation == HYPER_IO_HELLO ? HYPER_IO_QUEUES
+		    operation == HYPER_IO_HELLO ? b->scsi.request_queues + 2
 						: HYPER_IO_NETWORK_QUEUES);
 		response->common.queue_max = htole32(128);
 		*reply_size = operation == HYPER_IO_HELLO ? 64 : 80;
@@ -293,16 +293,30 @@ static int probe_backend(const char *path, uint64_t required)
 }
 int main(int argc, char **argv)
 {
-	struct backend b = {.memory_fd = -1, .tap = -1, .memory = MAP_FAILED};
+	struct backend b = {.memory_fd = -1, .tap = -1, .memory = MAP_FAILED,
+		.scsi = {.request_queues = HYPER_SCSI_REQUEST_QUEUES,
+			 .sg_prealloc = HYPER_SCSI_SG_PREALLOC}};
 	endpoint_init(&b.disk);
 	endpoint_init(&b.net);
 	/* Managed: memory target control notification network mac
-	 * net-notification. The three-argument mode remains for standalone
-	 * qualification fixtures. */
-	if ((argc != 3 && argc != 8) ||
+	 * net-notification [request-queues sg-prealloc]. The three-argument mode
+	 * remains for standalone qualification fixtures. */
+	if ((argc != 3 && argc != 8 && argc != 10) ||
 	    strlen(argv[2]) >= sizeof(b.target.vhost_wwpn))
 		return 2;
-	b.managed = argc == 8;
+	b.managed = argc >= 8;
+	if (argc == 10) {
+		char *end;
+		unsigned long queues = strtoul(argv[8], &end, 10);
+		if (!*argv[8] || *end || queues > HYPER_SCSI_REQUEST_QUEUES)
+			return 2;
+		unsigned long sg = strtoul(argv[9], &end, 10);
+		if (!*argv[9] || *end || sg > 2048 ||
+		    !hyper_scsi_resources_valid(queues, sg))
+			return 2;
+		b.scsi.request_queues = queues;
+		b.scsi.sg_prealloc = sg;
+	}
 	b.memory_path = argv[1];
 	struct sigaction action = {.sa_handler = stop_signal};
 	sigemptyset(&action.sa_mask);

@@ -44,6 +44,9 @@ int main(int argc, char **argv)
 		}
 		if (!pid) {
 			char memory[64];
+			char queues[16], sg[16];
+			snprintf(queues, sizeof(queues), "%u", clients[i].request_queues);
+			snprintf(sg, sizeof(sg), "%u", clients[i].sg_prealloc);
 			char control[64];
 			char notification[64], net_notification[64], target[32];
 			snprintf(memory, sizeof(memory), "/dev/hyper-memory-%u",
@@ -63,6 +66,7 @@ int main(int argc, char **argv)
 			execl("/usr/bin/hyper-io-service", "hyper-io-service",
 			      memory, target, control, notification,
 			      clients[i].network, clients[i].mac, net_notification,
+			      queues, sg,
 			      (char *)NULL);
 			_exit(127);
 		}

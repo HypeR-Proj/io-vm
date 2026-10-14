@@ -4,6 +4,7 @@
 /* Linux-only acceptance: vhost-scsi must read/write a disposable LIO block
  * device using page-backed memory supplied by the external Hyper module. */
 #define _GNU_SOURCE
+#include "hyper_scsi_resources.h"
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -67,6 +68,41 @@ static int checked_ioctl(int fd, unsigned long request, void *argument)
 	return -1;
 }
 
+static int resource_isolation(void)
+{
+	int a = open("/dev/vhost-scsi", O_RDWR | O_CLOEXEC);
+	int b = open("/dev/vhost-scsi", O_RDWR | O_CLOEXEC);
+	int result = -1;
+	struct hyper_scsi_resources first = {.request_queues = 1, .sg_prealloc = 2};
+	struct hyper_scsi_resources second = {.request_queues = 4, .sg_prealloc = 128};
+	struct hyper_scsi_resources observed;
+	struct vhost_vring_state ring = {.index = 3, .num = 8};
+	if (a < 0 || b < 0 ||
+	    checked_ioctl(a, HYPER_VHOST_SCSI_SET_RESOURCES, &first) ||
+	    checked_ioctl(b, HYPER_VHOST_SCSI_SET_RESOURCES, &second) ||
+	    checked_ioctl(a, HYPER_VHOST_SCSI_GET_RESOURCES, &observed) ||
+	    memcmp(&observed, &first, sizeof(first)))
+		goto out;
+	first.reserved[0] = 1;
+	if (ioctl(a, HYPER_VHOST_SCSI_SET_RESOURCES, &first) != -1 || errno != EINVAL)
+		goto out;
+	first.reserved[0] = 0;
+	if (checked_ioctl(a, VHOST_SET_OWNER, NULL) || checked_ioctl(b, VHOST_SET_OWNER, NULL))
+		goto out;
+	if (ioctl(a, HYPER_VHOST_SCSI_SET_RESOURCES, &second) != -1 || errno != EBUSY ||
+	    ioctl(a, VHOST_SET_VRING_NUM, &ring) != -1 || errno != ENOBUFS ||
+	    checked_ioctl(b, VHOST_SET_VRING_NUM, &ring) ||
+	    checked_ioctl(b, HYPER_VHOST_SCSI_GET_RESOURCES, &observed) ||
+	    memcmp(&observed, &second, sizeof(second)))
+		goto out;
+	result = 0;
+	puts("HypeR I/O: per-instance SCSI resource isolation passed");
+out:
+	if (a >= 0) close(a);
+	if (b >= 0) close(b);
+	return result;
+}
+
 static int prepare(struct backend *backend, const char *memory_device, const char *wwpn)
 {
 	struct {
@@ -89,7 +125,11 @@ static int prepare(struct backend *backend, const char *memory_device, const cha
 	 * to acquire normal page references for a DMA-capable block scatterlist. */
 	memset(backend->memory, 0, MEMORY_SIZE);
 	backend->fd = open("/dev/vhost-scsi", O_RDWR | O_CLOEXEC);
-	if (backend->fd < 0 || checked_ioctl(backend->fd, VHOST_SET_OWNER, NULL) ||
+	/* More than two pages below must use the chained allocation fallback. */
+	struct hyper_scsi_resources resources = {.request_queues = 4, .sg_prealloc = 2};
+	if (backend->fd < 0 ||
+	    checked_ioctl(backend->fd, HYPER_VHOST_SCSI_SET_RESOURCES, &resources) ||
+	    checked_ioctl(backend->fd, VHOST_SET_OWNER, NULL) ||
 	    checked_ioctl(backend->fd, VHOST_GET_FEATURES, &features))
 		return -1;
 	if (!(features & (UINT64_C(1) << VIRTIO_F_VERSION_1)))
@@ -197,28 +237,28 @@ static int exercise(struct backend *backend)
 	backend->selected = 2;
 	unsigned char *data = backend->memory + DATA_OFFSET;
 	const unsigned char inquiry[6] = {0x12, 0, 0, 0, 96, 0};
-	const unsigned char write10[10] = {0x2a, 0, 0, 0, 0, 8, 0, 0, 1, 0};
-	const unsigned char read10[10] = {0x28, 0, 0, 0, 0, 8, 0, 0, 1, 0};
+	const unsigned char write10[10] = {0x2a, 0, 0, 0, 0, 8, 0, 0, 32, 0};
+	const unsigned char read10[10] = {0x28, 0, 0, 0, 0, 8, 0, 0, 32, 0};
 	const unsigned char flush[10] = {0x35};
 	const unsigned char invalid[6] = {0xff};
 	if (command(backend, inquiry, sizeof(inquiry), 96, 0) || data[0] != 0)
 		return -1;
 	for (unsigned int round = 0; round < 32; ++round) {
 		backend->selected = 2 + round % (QUEUES - 2);
-		for (unsigned int index = 0; index < 512; ++index)
+		for (unsigned int index = 0; index < 16384; ++index)
 			data[index] = (unsigned char)(index + round * 17);
-		int result = command(backend, write10, sizeof(write10), 512, 1);
+		int result = command(backend, write10, sizeof(write10), 16384, 1);
 		if (result == 2) {
 			struct virtio_scsi_cmd_resp *response = (void *)(backend->memory + RESPONSE_OFFSET);
 			if ((response->sense[2] & 15) == 6)
-				result = command(backend, write10, sizeof(write10), 512, 1);
+				result = command(backend, write10, sizeof(write10), 16384, 1);
 		}
 		if (result || command(backend, flush, sizeof(flush), 0, 0))
 			return -1;
-		memset(data, 0, 512);
-		if (command(backend, read10, sizeof(read10), 512, 0))
+		memset(data, 0, 16384);
+		if (command(backend, read10, sizeof(read10), 16384, 0))
 			return -1;
-		for (unsigned int index = 0; index < 512; ++index) {
+		for (unsigned int index = 0; index < 16384; ++index) {
 			if (data[index] != (unsigned char)(index + round * 17)) {
 				fprintf(stderr, "readback mismatch at round=%u offset=%u\n", round, index);
 				return -1;
@@ -262,7 +302,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "usage: vhost-scsi-test SHARED_MEMORY_DEVICE TEST_WWPN\n");
 		return 2;
 	}
-	int result = prepare(&backend, argv[1], argv[2]);
+	int result = resource_isolation();
+	if (!result)
+		result = prepare(&backend, argv[1], argv[2]);
 	if (!result)
 		result = exercise(&backend);
 	if (result)

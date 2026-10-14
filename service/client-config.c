@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "hyper_clients.h"
 #include "hyper_network.h"
+#include "hyper_scsi_resources.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -27,15 +28,37 @@ int hyper_clients_read(const char *path,
 	FILE *file = fopen(path, "r");
 	if (!file)
 		return -1;
-	if (!fgets(line, sizeof(line), file) ||
-	    strcmp(line, "hyper.clients.v3\n"))
+	if (!fgets(line, sizeof(line), file))
+		goto invalid;
+	int resources = !strcmp(line, "hyper.clients.v4\n");
+	if (!resources && strcmp(line, "hyper.clients.v3\n"))
 		goto invalid;
 	while (fgets(line, sizeof(line), file)) {
-		char id[8], extra;
-		if (n == HYPER_BLOCK_CLIENTS || !strchr(line, '\n') ||
-		    sscanf(line, "%7s %31s %17s %c", id, clients[n].network,
-			   clients[n].mac, &extra) != 3)
+		char id[8], queues[8], sg[8], extra;
+		if (n == HYPER_BLOCK_CLIENTS || !strchr(line, '\n'))
 			goto invalid;
+		int fields = resources ?
+			sscanf(line, "%7s %31s %17s %7s %7s %c", id,
+			       clients[n].network, clients[n].mac, queues, sg, &extra) :
+			sscanf(line, "%7s %31s %17s %c", id,
+			       clients[n].network, clients[n].mac, &extra);
+		if (fields != (resources ? 5 : 3))
+			goto invalid;
+		clients[n].request_queues = HYPER_SCSI_REQUEST_QUEUES;
+		clients[n].sg_prealloc = HYPER_SCSI_SG_PREALLOC;
+		if (resources) {
+			for (const char *p = queues; *p; ++p)
+				if (!isdigit((unsigned char)*p))
+					goto invalid;
+			for (const char *p = sg; *p; ++p)
+				if (!isdigit((unsigned char)*p))
+					goto invalid;
+			clients[n].request_queues = strtoul(queues, NULL, 10);
+			clients[n].sg_prealloc = strtoul(sg, NULL, 10);
+			if (!hyper_scsi_resources_valid(clients[n].request_queues,
+						clients[n].sg_prealloc))
+				goto invalid;
+		}
 		for (const char *p = id; *p; ++p)
 			if (!isdigit((unsigned char)*p))
 				goto invalid;
