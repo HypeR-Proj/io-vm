@@ -464,3 +464,18 @@ Both platform builds run `tests/io-vm/guest-agent.py`: boot without a serial
 controller, hotplug it through PCIe, sample both CPUs and memory, reject unsafe
 RPCs and reconnect the host stream. HypeR's own integration tests cover its
 userspace device transport and read-only `vmm` observation path.
+
+## HypeR workspace integration
+
+This repository is part of the [HypeR workspace](https://github.com/HypeR-Proj/HypeR).
+System verification builds the selected source directly. Qualified publications use
+`ghcr.io/hyper-proj/io-vm` and include source materials for the installed cross libc.
+
+### Rolling qualified packages
+
+Successful main appliance builds publish immutable releases in `ghcr.io/hyper-proj/io-vm`
+and update `main-aarch64-qemu` / `main-aarch64-rpi5` when their source is still main.
+Platform publication is serialized so delayed older builds cannot roll the channel backward.
+HypeR resolves a channel once to its SHA-256 digest and verifies that generation; no source
+repository needs a package-version bump. Explicit digests remain available for reproduction.
+System topic tests build the selected appliance source directly, before these main channels advance.
