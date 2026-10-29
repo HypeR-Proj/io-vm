@@ -39,6 +39,9 @@ jobs:
       matrix:
         platform: [qemu, rpi5]
     runs-on: ubuntu-24.04
+    concurrency:
+      group: publish-channel-${{ matrix.platform }}
+      cancel-in-progress: false
     timeout-minutes: 15
     steps:
       - name: Validate the explicitly qualified build identity
@@ -86,6 +89,7 @@ jobs:
         run: printf '%s' "$GH_TOKEN" | oras login ghcr.io --username "$REGISTRY_USER" --password-stdin
       - name: Publish the qualified binary and corresponding source generation
         env:
+          GH_TOKEN: ${{ github.token }}
           APPLIANCE_PLATFORM: ${{ matrix.platform }}
           SOURCE_REVISION: ${{ inputs.revision || github.event.workflow_run.head_sha }}
           RELEASE_VERSION: ${{ inputs.version || format('main-{0}-run{1}-attempt{2}', github.event.workflow_run.head_sha, github.event.workflow_run.id, github.event.workflow_run.run_attempt) }}
@@ -122,6 +126,13 @@ jobs:
           if not re.fullmatch(r'ghcr.io/hyper-proj/io-vm@sha256:[0-9a-f]{64}', digest):
               raise ValueError('publisher did not return an immutable reference')
           Path('published-reference.txt').write_text(digest + '\n')
+          # Serialize channel updates per platform. A delayed older main build
+          # may publish its immutable release, but cannot replace today's main.
+          current = json.loads(subprocess.check_output([
+              'gh', 'api', f"repos/{os.environ['GITHUB_REPOSITORY']}/branches/main"]))
+          if current['commit']['sha'] == os.environ['SOURCE_REVISION']:
+              channel = 'main-aarch64-' + os.environ['APPLIANCE_PLATFORM']
+              subprocess.run(['oras', 'tag', digest, channel], check=True)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write('Qualified appliance: `' + digest + '`\n')
           PYTHON
