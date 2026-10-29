@@ -464,3 +464,9 @@ Both platform builds run `tests/io-vm/guest-agent.py`: boot without a serial
 controller, hotplug it through PCIe, sample both CPUs and memory, reject unsafe
 RPCs and reconnect the host stream. HypeR's own integration tests cover its
 userspace device transport and read-only `vmm` observation path.
+
+## HypeR workspace integration
+
+This repository is part of the [HypeR workspace](https://github.com/HypeR-Proj/HypeR).
+System verification builds the selected source directly. Qualified publications use
+`ghcr.io/hyper-proj/io-vm` and include source materials for the installed cross libc.

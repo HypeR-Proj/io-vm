@@ -144,6 +144,12 @@ def source_bundle(output, build, linux_output, busybox_output, module_checkout):
     paths.extend(((linux_output / ".config", "resolved/linux.config"),
                   (busybox_output / ".config", "resolved/busybox.config"),
                   (build / "compiler.txt", "resolved/compiler.txt")))
+    # Publication collects these from the compiler's installed cross libc.
+    # Local developer builds may use a different toolchain and omit publication.
+    materials = output / "libc-materials"
+    if materials.exists():
+        paths.extend((path, "libc-materials/" + path.name)
+                     for path in sorted(materials.iterdir()) if path.is_file())
     temporary = build / "corresponding-sources.tar.xz"
     with tarfile.open(temporary, "w:xz", preset=0) as archive:
         for path, name in paths:

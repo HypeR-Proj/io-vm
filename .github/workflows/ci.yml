@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   source-checks:
-    name: Archive and publication contracts
+    name: module
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

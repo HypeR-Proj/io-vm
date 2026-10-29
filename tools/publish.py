@@ -176,7 +176,7 @@ def main():
                        separators=(',', ':')),
                    '--annotation', 'org.hyper.kernel.release=' + metadata['kernel_release'],
                    '--annotation', 'org.opencontainers.image.revision=' + args.revision,
-                   '--annotation', 'org.opencontainers.image.source=https://github.com/roolrz/HypeR-io-vm',
+                   '--annotation', 'org.opencontainers.image.source=https://github.com/HypeR-Proj/io-vm',
                    '--export-manifest', str(staging / 'published.json')]
         if args.oci_layout:
             command += ['--oci-layout-path', str(args.oci_layout.resolve())]

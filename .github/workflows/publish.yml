@@ -106,7 +106,7 @@ jobs:
                   raise ValueError('source archive identity differs from the qualified build')
           if json.loads((base / 'manifest.json').read_text())['platform'] != os.environ['APPLIANCE_PLATFORM']:
               raise ValueError('artifact platform differs from selected publication profile')
-          reference = 'ghcr.io/roolrz/hyper-io-vm:' + os.environ['RELEASE_VERSION'] + '-aarch64-' + os.environ['APPLIANCE_PLATFORM']
+          reference = 'ghcr.io/hyper-proj/io-vm:' + os.environ['RELEASE_VERSION'] + '-aarch64-' + os.environ['APPLIANCE_PLATFORM']
           # Never overwrite an already published version. A registry/auth error
           # also fails closed; only an explicit missing manifest permits upload.
           probe = subprocess.run(['oras', 'manifest', 'fetch', reference], capture_output=True, text=True)
@@ -119,7 +119,7 @@ jobs:
               '--reference', reference], check=True, capture_output=True, text=True)
           print(result.stdout)
           digest = result.stdout.strip().splitlines()[-1]
-          if not re.fullmatch(r'ghcr.io/roolrz/hyper-io-vm@sha256:[0-9a-f]{64}', digest):
+          if not re.fullmatch(r'ghcr.io/hyper-proj/io-vm@sha256:[0-9a-f]{64}', digest):
               raise ValueError('publisher did not return an immutable reference')
           Path('published-reference.txt').write_text(digest + '\n')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:

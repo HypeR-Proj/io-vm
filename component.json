@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "io-vm",
+  "kind": "appliance",
+  "origin": {
+    "repository": "https://github.com/roolrz/HypeR-io-vm",
+    "commit": "56b1b8788820fab35225e00c3c31d551903a42ac"
+  },
+  "sources": {},
+  "mounts": {},
+  "tests": [
+    [
+      "make",
+      "-C",
+      "{component}",
+      "test"
+    ]
+  ],
+  "packages": [],
+  "SPDX-FileCopyrightText": "2026 roolrz",
+  "SPDX-License-Identifier": "Apache-2.0"
+}

@@ -63,7 +63,9 @@ jobs:
           /tmp/hyper-network-test
       - name: Build the pinned upstream kernel, BusyBox, and external module
         id: kernel-build
-        run: make base PLATFORM=${{ matrix.platform }} CROSS_COMPILE=aarch64-linux-gnu- JOBS=4
+        run: |
+          python3 tools/libc-materials.py --output target/io-vm/libc-materials
+          make base PLATFORM=${{ matrix.platform }} CROSS_COMPILE=aarch64-linux-gnu- JOBS=4
       - name: Verify block discovery and client range isolation
         run: |
           aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -Iinclude \
