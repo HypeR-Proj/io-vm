@@ -4,8 +4,11 @@ name: Upstream kernel and real-disk acceptance
 on:
   push:
     branches: [main]
+    paths-ignore: [CONTRIBUTING.md, .github/workflows/topic-button.yml]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: [CONTRIBUTING.md, .github/workflows/topic-button.yml]
   workflow_dispatch:
     inputs:
       operation:
@@ -26,7 +29,7 @@ permissions:
   contents: read
 jobs:
   qemu-disk:
-    if: inputs.operation != 'publish'
+    if: inputs.operation != 'publish' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     name: AArch64 ${{ matrix.platform }} kernel, appliance, and disk acceptance
     strategy:
       fail-fast: false
