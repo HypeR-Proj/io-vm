@@ -54,7 +54,7 @@ main builds automatically publish the complete appliance as an immutable
 prerelease package. These checks do not yet exercise the cross-VM
 HypeR path; that remains part of qualifying a digest for the main repository.
 
-The build also creates a complete appliance under `target/io-vm/boot/`, selected
+The build also creates a complete appliance under `out/build/io-vm/boot/`, selected
 by `qemu-boot.json`, and matching source archives under `source-artifacts/`.
 Its explicit `hyper.role=io` boot argument loads the bridge modules, exports
 `/dev/sda` through LIO iblock, and starts the control service. `hyper.role=business`
@@ -95,8 +95,8 @@ path cannot pass using UART fallback. For a local built appliance:
 
 ```sh
 python3 -B tests/io-vm/bringup.py \
-  --boot-index target/io-vm/qemu-boot.json --console virtio \
-  --log target/io-vm/bringup-virtio.log
+  --boot-index out/build/io-vm/qemu-boot.json --console virtio \
+  --log out/build/io-vm/bringup-virtio.log
 ```
 
 This creates `bringup-virtio.log` for the terminal and

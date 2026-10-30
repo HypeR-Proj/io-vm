@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2026 roolrz
 # SPDX-License-Identifier: Apache-2.0
 
-OUTPUT ?= $(CURDIR)/target/io-vm
+OUT ?= $(CURDIR)/out
+OUTPUT ?= $(OUT)/build/io-vm
 PLATFORM ?= qemu
 JOBS ?= 4
 CROSS_COMPILE ?=

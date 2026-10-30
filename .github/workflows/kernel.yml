@@ -27,6 +27,8 @@ on:
         type: string
 permissions:
   contents: read
+env:
+  OUT: ${{ github.workspace }}/out
 jobs:
   qemu-disk:
     if: inputs.operation != 'publish' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
@@ -44,12 +46,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            target/io-vm/downloads/
-            target/io-vm/sources/
-            target/io-vm/build/
-          key: upstream-aarch64-${{ matrix.platform }}-ubuntu24-${{ hashFiles('sources.lock.json', 'configs/*') }}-${{ github.run_id }}
+            ${{ env.OUT }}/build/io-vm/downloads/
+            ${{ env.OUT }}/build/io-vm/sources/
+            ${{ env.OUT }}/build/io-vm/build/
+          key: upstream-out-aarch64-${{ matrix.platform }}-ubuntu24-${{ hashFiles('sources.lock.json', 'configs/*') }}-${{ github.run_id }}
           restore-keys: |
-            upstream-aarch64-${{ matrix.platform }}-ubuntu24-${{ hashFiles('sources.lock.json', 'configs/*') }}-
+            upstream-out-aarch64-${{ matrix.platform }}-ubuntu24-${{ hashFiles('sources.lock.json', 'configs/*') }}-
       - name: Install cross compiler and QEMU
         run: |
           sudo apt-get update
@@ -67,35 +69,35 @@ jobs:
       - name: Build the pinned upstream kernel, BusyBox, and external module
         id: kernel-build
         run: |
-          python3 tools/libc-materials.py --output target/io-vm/libc-materials
+          python3 tools/libc-materials.py --output ${{ env.OUT }}/build/io-vm/libc-materials
           make base PLATFORM=${{ matrix.platform }} CROSS_COMPILE=aarch64-linux-gnu- JOBS=4
       - name: Verify block discovery and client range isolation
         run: |
           aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -Iinclude \
             tests/io-vm/block-owner.c service/block.c service/block-target.c \
-            service/client-config.c -o target/io-vm/block-owner-test
+            service/client-config.c -o ${{ env.OUT }}/build/io-vm/block-owner-test
           python3 - <<'PYTHON'
           import json
           import subprocess
           from pathlib import Path
-          base = json.loads(Path('target/io-vm/${{ matrix.platform }}-base.json').read_text())
+          base = json.loads(Path('${{ env.OUT }}/build/io-vm/${{ matrix.platform }}-base.json').read_text())
           subprocess.run(['python3', '-B', 'tests/io-vm/block-owner.py',
                           '--base', base['directory'], '--manifest-sha256', base['manifest_sha256'],
-                          '--test-binary', 'target/io-vm/block-owner-test',
-                          '--log', 'target/io-vm/block-owner.log'], check=True)
+                          '--test-binary', '${{ env.OUT }}/build/io-vm/block-owner-test',
+                          '--log', '${{ env.OUT }}/build/io-vm/block-owner.log'], check=True)
           PYTHON
       - name: Verify TAP checksum and segmentation fallback
         run: |
-          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror tests/io-vm/tap-offload.c -o target/io-vm/tap-offload-test
+          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror tests/io-vm/tap-offload.c -o ${{ env.OUT }}/build/io-vm/tap-offload-test
           python3 - <<'PYTHON'
           import json
           import subprocess
           from pathlib import Path
-          base = json.loads(Path('target/io-vm/${{ matrix.platform }}-base.json').read_text())
+          base = json.loads(Path('${{ env.OUT }}/build/io-vm/${{ matrix.platform }}-base.json').read_text())
           subprocess.run(['python3', '-B', 'tests/io-vm/tap-offload.py',
                           '--base', base['directory'], '--manifest-sha256', base['manifest_sha256'],
-                          '--test-binary', 'target/io-vm/tap-offload-test',
-                          '--log', 'target/io-vm/tap-offload.log'], check=True)
+                          '--test-binary', '${{ env.OUT }}/build/io-vm/tap-offload-test',
+                          '--log', '${{ env.OUT }}/build/io-vm/tap-offload.log'], check=True)
           PYTHON
       - name: Boot the complete business appliance
         run: |
@@ -103,47 +105,47 @@ jobs:
           import json
           import subprocess
           from pathlib import Path
-          boot = json.loads(Path('target/io-vm/${{ matrix.platform }}-boot.json').read_text())
+          boot = json.loads(Path('${{ env.OUT }}/build/io-vm/${{ matrix.platform }}-boot.json').read_text())
           subprocess.run(['python3', '-B', 'tests/io-vm/business.py', '--boot', boot['directory'],
-                          '--log', 'target/io-vm/business.log', '--reset'], check=True)
+                          '--log', '${{ env.OUT }}/build/io-vm/business.log', '--reset'], check=True)
           subprocess.run(['python3', '-B', 'tests/io-vm/business.py', '--boot', boot['directory'],
-                          '--log', 'target/io-vm/business-hold.log', '--hold'], check=True)
+                          '--log', '${{ env.OUT }}/build/io-vm/business-hold.log', '--hold'], check=True)
           PYTHON
       - name: Boot diskless bring-up on the GICv2 virtual platform
-        run: python3 -B tests/io-vm/bringup.py --boot-index target/io-vm/${{ matrix.platform }}-boot.json --log target/io-vm/bringup.log
+        run: python3 -B tests/io-vm/bringup.py --boot-index ${{ env.OUT }}/build/io-vm/${{ matrix.platform }}-boot.json --log ${{ env.OUT }}/build/io-vm/bringup.log
       - name: Verify virtio userspace console with separate UART kernel logs
-        run: python3 -B tests/io-vm/bringup.py --boot-index target/io-vm/${{ matrix.platform }}-boot.json --console virtio --log target/io-vm/bringup-virtio.log
+        run: python3 -B tests/io-vm/bringup.py --boot-index ${{ env.OUT }}/build/io-vm/${{ matrix.platform }}-boot.json --console virtio --log ${{ env.OUT }}/build/io-vm/bringup-virtio.log
       - name: Verify the restricted guest agent after serial hotplug
-        run: python3 -B tests/io-vm/guest-agent.py --boot-index target/io-vm/${{ matrix.platform }}-boot.json --log target/io-vm/guest-agent.log
+        run: python3 -B tests/io-vm/guest-agent.py --boot-index ${{ env.OUT }}/build/io-vm/${{ matrix.platform }}-boot.json --log ${{ env.OUT }}/build/io-vm/guest-agent.log
       - name: Compile the AArch64 disk fixture
-        run: aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -I include tests/io-vm/vhost-scsi.c -o target/io-vm/vhost-scsi-test
+        run: aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -I include tests/io-vm/vhost-scsi.c -o ${{ env.OUT }}/build/io-vm/vhost-scsi-test
       - name: Compile the granule retirement regression module
         run: |
-          make -C target/io-vm/build/${{ matrix.platform }}/linux \
+          make -C ${{ env.OUT }}/build/io-vm/build/${{ matrix.platform }}/linux \
             ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             M="$PWD/tests/guest-memory" \
-            MO="$PWD/target/io-vm/build/${{ matrix.platform }}/retirement-tests" modules
+            MO="${{ env.OUT }}/build/io-vm/build/${{ matrix.platform }}/retirement-tests" modules
       - name: Verify vhost-scsi writes against the QEMU disk image
         run: |
           python3 - <<'PYTHON'
           import json
           import subprocess
           from pathlib import Path
-          base = json.loads(Path('target/io-vm/${{ matrix.platform }}-base.json').read_text())
+          base = json.loads(Path('${{ env.OUT }}/build/io-vm/${{ matrix.platform }}-base.json').read_text())
           subprocess.run(['python3', '-B', 'tests/io-vm/verify.py',
                           '--base', base['directory'],
                           '--manifest-sha256', base['manifest_sha256'],
-                          '--test-binary', 'target/io-vm/vhost-scsi-test',
-                          '--retirement-module', 'target/io-vm/build/${{ matrix.platform }}/retirement-tests/hyper_granules_test.ko'], check=True)
+                          '--test-binary', '${{ env.OUT }}/build/io-vm/vhost-scsi-test',
+                          '--retirement-module', '${{ env.OUT }}/build/io-vm/build/${{ matrix.platform }}/retirement-tests/hyper_granules_test.ko'], check=True)
           PYTHON
       - name: Save incremental upstream build cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
-            target/io-vm/downloads/
-            target/io-vm/sources/
-            target/io-vm/build/
+            ${{ env.OUT }}/build/io-vm/downloads/
+            ${{ env.OUT }}/build/io-vm/sources/
+            ${{ env.OUT }}/build/io-vm/build/
           key: ${{ steps.upstream-cache.outputs.cache-primary-key }}
       - name: Retain the acceptance log
         if: always()
@@ -151,16 +153,16 @@ jobs:
         with:
           name: ${{ matrix.platform }}-disk-acceptance-log
           path: |
-            target/io-vm/acceptance.log
-            target/io-vm/business.log
-            target/io-vm/guest-agent.log
-            target/io-vm/guest-agent.json
-            target/io-vm/bringup.log
-            target/io-vm/bringup-virtio.log
-            target/io-vm/bringup-virtio.uart.log
-            target/io-vm/business-hold.log
-            target/io-vm/tap-offload.log
-            target/io-vm/block-owner.log
+            ${{ env.OUT }}/build/io-vm/acceptance.log
+            ${{ env.OUT }}/build/io-vm/business.log
+            ${{ env.OUT }}/build/io-vm/guest-agent.log
+            ${{ env.OUT }}/build/io-vm/guest-agent.json
+            ${{ env.OUT }}/build/io-vm/bringup.log
+            ${{ env.OUT }}/build/io-vm/bringup-virtio.log
+            ${{ env.OUT }}/build/io-vm/bringup-virtio.uart.log
+            ${{ env.OUT }}/build/io-vm/business-hold.log
+            ${{ env.OUT }}/build/io-vm/tap-offload.log
+            ${{ env.OUT }}/build/io-vm/block-owner.log
           if-no-files-found: ignore
       - name: Retain build inputs for Hyper integration
         if: always() && steps.kernel-build.outcome == 'success'
@@ -168,10 +170,10 @@ jobs:
         with:
           name: aarch64-${{ matrix.platform }}-base
           path: |
-            target/io-vm/artifacts/
-            target/io-vm/boot/
-            target/io-vm/source-artifacts/
-            target/io-vm/vhost-scsi-test
+            ${{ env.OUT }}/build/io-vm/artifacts/
+            ${{ env.OUT }}/build/io-vm/boot/
+            ${{ env.OUT }}/build/io-vm/source-artifacts/
+            ${{ env.OUT }}/build/io-vm/vhost-scsi-test
           if-no-files-found: error
           retention-days: 7
   publish-qualified:

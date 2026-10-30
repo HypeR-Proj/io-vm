@@ -749,7 +749,7 @@ executable for this step, run
 Board and I/O initramfs composition targets accept `IO_VM_ORAS`.
 
 The command prints the verified generation directory under
-`target/io-vm/packages/`. Channel resolution uses the registry; an explicit cached
+`OUT/build/build/io-vm/packages/`. Channel resolution uses the registry; an explicit cached
 digest verifies and reuses that directory without network access. A private GHCR package requires `oras login ghcr.io` first;
 credentials belong to the local registry configuration, never to the repository.
 Only the runtime payload is fetched. The OCI manifest also identifies the

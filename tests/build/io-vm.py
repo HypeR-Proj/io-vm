@@ -57,6 +57,27 @@ class BuildVersion(unittest.TestCase):
 
 
 class KernelSources(unittest.TestCase):
+    def test_corresponding_sources_retain_standalone_make_backend_and_custom_out(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ('downloads', 'build', 'linux', 'busybox'):
+                (root / name).mkdir()
+            (root / 'build/compiler.txt').write_text('test compiler\n')
+            for name in ('linux', 'busybox'):
+                (root / name / '.config').write_text('CONFIG_TEST=y\n')
+            source = BUILD.source_bundle(root, root / 'build', root / 'linux', root / 'busybox', ROOT)
+            with tarfile.open(source) as archive:
+                archive.extractall(root / 'extracted', filter='data')
+            checkout = root / 'extracted/hyper-io-vm'
+            self.assertTrue((checkout / 'mk/build.mk').is_file())
+            environment = {key: value for key, value in os.environ.items()
+                           if not key.startswith(('HYPER_', 'MAKE')) and key not in ('MFLAGS', 'OUT', 'OUTPUT')}
+            output = root / 'custom output'
+            run = subprocess.run(['make', '-n', 'base', f'OUT={output}'], cwd=checkout,
+                                 env=environment, check=True, capture_output=True, text=True)
+            self.assertIn('tools/build.py', run.stdout)
+            self.assertIn(str(output / 'build/io-vm'), run.stdout)
+
     def test_patch_revision_gets_separate_sources_and_failed_patch_is_not_cached(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
