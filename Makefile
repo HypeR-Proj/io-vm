@@ -1,26 +1,10 @@
 # SPDX-FileCopyrightText: 2026 roolrz
 # SPDX-License-Identifier: Apache-2.0
 
-OUTPUT ?= $(CURDIR)/target/io-vm
-PLATFORM ?= qemu
-JOBS ?= 4
-CROSS_COMPILE ?=
-
-.PHONY: fetch base all-platforms test
-fetch:
-	python3 -B tools/build.py --output "$(OUTPUT)" --fetch-only
-
-base:
-	python3 -B tools/build.py --output "$(OUTPUT)" --platform "$(PLATFORM)" \
-		--jobs "$(JOBS)" --cross-compile "$(CROSS_COMPILE)"
-
-# Separate outputs keep each profile and its corresponding sources coherent.
-all-platforms:
-	$(MAKE) base PLATFORM=qemu OUTPUT="$(OUTPUT)/qemu"
-	$(MAKE) base PLATFORM=rpi5 OUTPUT="$(OUTPUT)/rpi5"
-
-test:
-	python3 -B tests/build/console.py
-	python3 -B tests/build/io-vm.py
-	python3 -B tests/build/publish.py
-	python3 -B tests/build/clients.py
+# Build this module within a repo workspace; all generated files belong to OUT.
+HYPER_BUILD_SYSTEM ?= $(shell python3 -c 'from pathlib import Path; p=Path.cwd(); print(next((str(r) for r in (p,*p.parents) if (r/"scripts/buildsystem/model.py").is_file()), ""))')
+ifeq ($(strip $(HYPER_BUILD_SYSTEM)),)
+include mk/build.mk
+else
+include $(HYPER_BUILD_SYSTEM)/mk/entry.mk
+endif

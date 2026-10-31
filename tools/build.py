@@ -133,7 +133,7 @@ def check_config(requested, actual):
 def source_bundle(output, build, linux_output, busybox_output, module_checkout):
     """Retain exact upstream archives and all local build inputs beside binaries."""
     paths = []
-    for directory in ("configs", "include", "modules", "service", "rootfs", "tools", "scripts", "tests", "patches", "LICENSES"):
+    for directory in ("configs", "include", "mk", "modules", "service", "rootfs", "tools", "scripts", "tests", "patches", "LICENSES"):
         origin = module_checkout if directory in ("include", "modules") else ROOT
         paths.extend((path, "hyper-io-vm/" + str(path.relative_to(origin)))
                      for path in sorted((origin / directory).rglob("*"))
@@ -166,7 +166,7 @@ def source_bundle(output, build, linux_output, busybox_output, module_checkout):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT / "target/io-vm")
+    parser.add_argument("--output", type=Path, default=Path(os.environ.get("OUT", ROOT / "out")) / "build/io-vm")
     parser.add_argument("--platform", choices=["qemu", "rpi5"], default="qemu")
     parser.add_argument("--cross-compile", default=os.environ.get("CROSS_COMPILE", ""))
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 1, 8))

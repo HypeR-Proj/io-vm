@@ -16,5 +16,20 @@
       "test"
     ]
   ],
-  "packages": []
+  "packages": [],
+  "build": {
+    "makefile": "mk/build.mk",
+    "actions": {
+      "*": [
+        [
+          "make",
+          "-C",
+          "{source}",
+          "{action}",
+          "OUTPUT={out}"
+        ]
+      ]
+    }
+  },
+  "test_requires_rust": false
 }

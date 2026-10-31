@@ -6,6 +6,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -30,7 +31,7 @@ def export(build, platform, output):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--build-output', type=Path, default=Path('target/io-vm'))
+    parser.add_argument('--build-output', type=Path, default=Path(os.environ.get('OUT', Path(__file__).resolve().parents[1] / 'out')) / 'build/io-vm')
     parser.add_argument('--platform', choices=['qemu', 'rpi5'], required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
