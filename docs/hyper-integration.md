@@ -32,7 +32,7 @@ on the host and checks DMA memory admission after both VMs retire.
 See [implementation status](https://hyper-proj.github.io/HypeR/docs/project/status.html#linux-io-vm-baseline) for the acceptance
 boundary. Pi 5 device assignment has basic storage/network measurements;
 extended hardware qualification remains deferred.
-The board deployment path is described in [board storage](https://hyper-proj.github.io/build/docs/deployment/board-storage.html).
+The board deployment path is described in [board storage](https://hyper-proj.github.io/HypeR/docs/usage/board-storage.html).
 
 ## Selected backend interfaces
 
@@ -458,7 +458,7 @@ Host tests and QEMU acceptance do not qualify the physical RP1 link, cache
 maintenance or interrupt ordering. The physical TCP survey records basic
 operation; sustained traffic, concurrent I/O and fault coverage remain
 [deferred qualification](https://hyper-proj.github.io/HypeR/docs/project/roadmap.html#deferred-hardware-qualification).
-The [manual network tools](https://github.com/HypeR-Proj/ci/blob/main/hardware/network/README.md) are opt-in guest
+The [manual network tools](https://github.com/HypeR-Proj/system-tests/blob/main/hardware/network/README.md) are opt-in guest
 additions and do not change the default Alpine rootfs or I/O VM appliance.
 
 ## Shared pages and DMA
@@ -658,7 +658,7 @@ server does not block the guest shell; client logs are in
 `/var/log/udhcpc-<interface>.log`. This applies to both RAM and disk roots.
 Existing persistent disks keep their on-disk VM definitions, guest FITs and
 root filesystems across builds. Follow
-[updating existing deployments](https://hyper-proj.github.io/build/docs/deployment/board-storage.html#updating-existing-deployments)
+[updating existing deployments](https://hyper-proj.github.io/HypeR/docs/usage/board-storage.html#updating-existing-deployments)
 when changing device policy or guest startup files.
 
 ### Startup diagnostics
@@ -790,7 +790,7 @@ throughout the run. System verification never compiles the I/O appliance.
 The local I/O reset suite remains `sh tests/ci/run.sh io-vm`; set `IO_VM_PACKAGE`
 for a local appliance or `IO_VM_REFERENCE` for an exact published generation.
 Board-managed Native FAT and business-client acceptance paths are documented in
-[board storage](https://hyper-proj.github.io/build/docs/deployment/board-storage.html).
+[board storage](https://hyper-proj.github.io/HypeR/docs/usage/board-storage.html).
 
 Physical virtio discovery accepts the trigger declared by firmware, including
 QEMU's edge-triggered SPIs. Active physical edge sources remain enabled;
