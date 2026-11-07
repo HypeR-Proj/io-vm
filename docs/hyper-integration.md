@@ -467,14 +467,15 @@ Direct queue consumption requires Linux to access queue metadata, responses,
 and every guest data buffer referenced by descriptors. The trusted deployment
 currently grants the entire RAM VMO of each business VM with an I/O-backed disk
 or network device. Both devices share one grant and Linux mapping.
-Each Native volume client uses a dedicated 1 MiB shared I/O pool, including
+Each Native volume client uses a dedicated 2 MiB shared I/O pool, including
 separate pools for the default configuration and system volumes.
 Bridge protocol version 3 retains six storage
 split queues: control, event, and four request queues. The Native client batches
 notifications for newly published commands and refills slots as individual
-commands complete. Its 512 KiB data pool supports up to four small concurrent
-commands or one merged 512 KiB command. Each command owns its descriptor chain
-and allocated data span until completion. Overlapping writes and flushes remain
+commands complete. Fifteen 128 KiB data spans fit in each Native pool, allowing
+two full 512 KiB commands concurrently. Four command heads do not imply capacity
+for four maximum-size commands. Each command owns its descriptor chain and
+allocated data span until completion. Overlapping writes and flushes remain
 ordered by the device engine; independent logical producers use bounded
 [Native block queues](https://hyper-proj.github.io/lib-block/docs/block-io.html). Unretired requests disconnect the
 device on failure; their memory lease remains retained until backend quiescence.
@@ -547,10 +548,10 @@ cancellation/reset handling.
   exclusive-memory accounting value.
 
 For the default resident I/O VM, 64 MiB RAM plus the 1 MiB management pool
-and two 1 MiB Native data pools account for 67 MiB (70,254,592 bytes) of
+and two 2 MiB Native data pools account for 69 MiB (72,351,744 bytes) of
 backing. The ramfs system layout needs only the data volume pool plus management,
-for 66 MiB (69,206,016 bytes). A disk-backed 256 MiB Alpine guest can therefore
-require roughly 323 MiB of combined VM backing before Native and kernel overhead.
+for 67 MiB (70,254,592 bytes). A disk-backed 256 MiB Alpine guest can therefore
+require roughly 325 MiB of combined VM backing before Native and kernel overhead.
 
 Virtio-scsi permits multiple request queues but does not require one per guest
 CPU. The guest driver chooses how many to use within the advertised per-client
