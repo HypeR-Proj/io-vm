@@ -24,6 +24,10 @@
 #define HYPER_IO_BLOCK_ENUM 12
 #define HYPER_IO_BLOCK_READ 13
 #define HYPER_IO_BLOCK_BIND 14
+#define HYPER_IO_RANDOM 15
+#define HYPER_IO_FEATURE_RANDOM (1ULL << 3)
+#define HYPER_IO_OWNER_FEATURES (7ULL | HYPER_IO_FEATURE_RANDOM)
+#define HYPER_IO_RANDOM_MAX 192
 #define HYPER_IO_BLOCK_READ_ONLY 1U
 #define HYPER_IO_BLOCK_MAX_READ (1U << 20)
 #define HYPER_IO_NETWORK_QUEUES 2
@@ -33,6 +37,7 @@
 #define HYPER_IO_BUSY 3
 #define HYPER_IO_BACKEND_FAILURE 4
 #define HYPER_IO_QUIESCENCE_FAILED 5
+#define HYPER_IO_NOT_READY 6
 struct hyper_io_header {
 	__le32 magic;
 	__le16 version, operation;
@@ -72,6 +77,17 @@ struct hyper_io_network_reply {
 /* These operations exist only on the Native owner's control endpoint zero.
  * Disk identifiers remain valid for this appliance's lifetime. LBAs below use
  * the enumerated logical sector size, never an implicit 512-byte unit. */
+/* Owner-only initialized Linux random bytes. Successful bodies are never
+ * replayed. Every retry, including NOT_READY, requires a new transaction. */
+struct hyper_io_random {
+	struct hyper_io_header header;
+	__le32 bytes, reserved;
+};
+struct hyper_io_random_reply {
+	struct hyper_io_header header;
+	__le32 status, bytes;
+	__u8 data[HYPER_IO_RANDOM_MAX];
+};
 struct hyper_io_block_enum {
 	struct hyper_io_header header;
 	__le32 cursor, reserved;

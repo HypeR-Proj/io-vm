@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--manifest-sha256", required=True)
     parser.add_argument("--test-binary", type=Path, required=True)
+    parser.add_argument("--random-test-binary", type=Path, required=True)
     parser.add_argument("--qemu", default="qemu-system-aarch64")
     parser.add_argument("--log", type=Path, required=True)
     args = parser.parse_args()
@@ -33,6 +34,9 @@ def main():
         binary = overlay / "usr/bin/block-owner-test"
         shutil.copyfile(args.test_binary, binary)
         binary.chmod(0o755)
+        random_binary = overlay / "usr/bin/random-test"
+        shutil.copyfile(args.random_test_binary, random_binary)
+        random_binary.chmod(0o755)
         (overlay / "etc/hyper-clients.conf").write_text(
             "hyper.clients.v3\n0 - -\n1 - -\n2 - -\n3 - -\n4 - -\n")
         (overlay / "init").write_text("""#!/bin/sh
@@ -50,6 +54,12 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
 done
 status=0
+/usr/bin/random-test || status=$?
+if [ "$status" -ne 0 ]; then
+    echo "RANDOM-TEST-EXIT:$status"
+    poweroff -f
+    exit "$status"
+fi
 /usr/bin/block-owner-test || status=$?
 echo "BLOCK-OWNER-TEST-EXIT:$status"
 poweroff -f
@@ -68,11 +78,11 @@ poweroff -f
                 for offset, data in records:
                     disk.seek(offset)
                     disk.write(data)
-        command = [args.qemu, "-machine", "virt,gic-version=3", "-cpu", "cortex-a72",
+        command = [args.qemu, "-machine", "virt,gic-version=3", "-cpu", "max",
                    "-m", "256", "-nographic", "-no-reboot", "-nic", "none",
                    "-kernel", str(work / "boot" / boot["kernel"]),
                    "-initrd", str(work / "boot" / boot["initramfs"]),
-                   "-append", "console=ttyAMA0 rdinit=/init panic=-1",
+                   "-append", "console=ttyAMA0 rdinit=/init panic=-1 random.trust_cpu=on",
                    "-device", "virtio-scsi-device,id=scsi"]
         for index, (name, sector) in enumerate((("first", 512), ("second", 4096))):
             command += ["-drive", f"if=none,id={name},file={work}/{name}.img,format=raw",
@@ -89,7 +99,9 @@ poweroff -f
             returncode = 1
         args.log.parent.mkdir(parents=True, exist_ok=True)
         args.log.write_bytes(output)
-        if returncode or b"Kernel panic" in output or b"BLOCK-OWNER-TEST-EXIT:0" not in output:
+        if (returncode or b"Kernel panic" in output or
+                b"BLOCK-OWNER-TEST-EXIT:0" not in output or
+                b"Initialized Linux random: RNDR source and bounded requests PASS" not in output):
             raise SystemExit(f"block-owner test failed; see {args.log}")
     print("Block owner: multiple disks, 4K geometry, bounded reads and range isolation passed")
 

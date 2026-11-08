@@ -233,20 +233,20 @@ read-only flag and LIO iblock's `readonly=1`. Data requests continue directly
 through standard virtio-scsi/vhost-scsi; the owner is not a data relay.
 
 Management commands extend protocol version 3. All integers are little-endian;
-request headers and the first 48 reply bytes retain the existing identity and
-status layout. All failures use a 48-byte reply. Only control endpoint zero
+request headers and the status at byte 40 retain the existing identity and
+status layout. Byte 44 is reserved except for RANDOM returned-byte counts. All failures use a 48-byte reply. Only control endpoint zero
 admits these operations; Native runtime brokers must never forward them from a
 guest's data control channel.
 
 | Operation | Request after the 40-byte header | Successful reply after byte 48 |
 | --- | --- | --- |
-| `BLOCK_HELLO` (11) | Empty | `u64 capabilities = 7`, `u32 max_read_bytes = 1048576`, `u32 reserved = 0` |
+| `BLOCK_HELLO` (11) | Empty | `u64 capabilities = 15`, `u32 max_read_bytes = 1048576`, `u32 reserved = 0` |
 | `BLOCK_ENUM` (12) | `u32 cursor`, `u32 reserved = 0` | `u64 disk_id`, `u64 capacity_bytes`, `u32 logical_sector_size`, `u32 physical_sector_size`, `u32 flags`, `u32 next_cursor` |
 | `BLOCK_READ` (13) | `u64 disk_id`, `u64 byte_offset`, `u64 byte_length`, `u64 scratch_offset` | Empty |
 | `BLOCK_BIND` (14) | `u32 client`, `u32 flags`, `u64 disk_id`, `u64 first_lba`, `u64 sector_count` | Empty |
 
 `BLOCK_HELLO` starts the owner's binding session even if no disk exists.
-Capabilities bits 0/1/2 mean enumerate/read/bind. Enumeration starts at cursor
+Capabilities bits 0/1/2 mean enumerate/read/bind; bit 3 advertises `RANDOM` (15). Enumeration starts at cursor
 zero, follows `next_cursor`, and ends with an all-zero 32-byte payload.
 Flags bit 0 means read-only; no other flags are accepted. Binding LBAs use the
 enumerated logical sector size; the backend converts them to device-mapper's
@@ -256,6 +256,21 @@ aligned and fit both the disk and the owner's prepared scratch mapping.
 mapping token zero. A read completes before its reply is published, and the
 owner must not access its destination concurrently. No management operation
 writes directly to a raw disk.
+
+`RANDOM` requests contain `u32 bytes` (1..192) and `u32 reserved = 0` after
+its 40-byte header. A successful reply has the standard header, `u32 status = 0`,
+`u32 returned_bytes`, then exactly that many random bytes (at most 240 bytes
+total). Errors are 48 bytes with zero returned bytes. The capability indicates
+protocol support, not entropy readiness. Generation uses initialized Linux
+`getrandom(GRND_NONBLOCK)`; status 6 (`NOT_READY`) requires a later request with a
+new transaction. No weak or uninitialized fallback exists. Every admitted random
+transaction is consumed, including failures; duplicates and stale transactions
+return `INVALID`, and random bodies never enter the normal control replay cache.
+The service clears its response buffer after transmission, including transport
+errors, and diagnostics never contain random bytes. Only owner endpoint zero
+accepts this operation; no guest data endpoint gains access. Pi5 uses Linux's
+RNG200 driver once Native assigns the device. No entropy device is implicitly
+assigned by enabling the driver.
 
 Each data client retains one service process, memory mapping and mailbox.
 Storage and networking keep separate vhost fds, notifications and reset epochs.

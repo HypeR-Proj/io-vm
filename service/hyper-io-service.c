@@ -5,6 +5,7 @@
 #include "block.h"
 #include "hyper_io_session.h"
 #include "hyper_network.h"
+#include "random.h"
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -16,6 +17,10 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+_Static_assert(sizeof(struct hyper_io_random) == 48, "random request layout");
+_Static_assert(sizeof(struct hyper_io_random_reply) == 240, "random reply layout");
+_Static_assert(sizeof(struct hyper_io_random_reply) <= HYPER_IO_RECORD,
+	       "random reply fits control transport");
 _Static_assert(sizeof(struct hyper_io_header) == 40, "header layout");
 _Static_assert(sizeof(struct hyper_io_activate) == 240,
 	       "storage activation layout");
@@ -64,6 +69,8 @@ static const char *operation_name(uint16_t operation)
 		return "BLOCK_READ";
 	case HYPER_IO_BLOCK_BIND:
 		return "BLOCK_BIND";
+	case HYPER_IO_RANDOM:
+		return "RANDOM";
 	default:
 		return "UNKNOWN";
 	}
@@ -83,6 +90,8 @@ static const char *status_name(uint32_t status)
 		return "backend failure";
 	case HYPER_IO_QUIESCENCE_FAILED:
 		return "quiescence failed";
+	case HYPER_IO_NOT_READY:
+		return "not ready";
 	default:
 		return "unknown status";
 	}
@@ -112,9 +121,9 @@ static int idle(const struct backend *b)
 }
 static uint32_t dispatch(struct backend *b, struct hyper_io_session *session,
 			 const unsigned char *message, size_t size,
-			 struct hyper_io_network_reply *response,
-			 size_t *reply_size)
+			 void *reply, size_t *reply_size)
 {
+	struct hyper_io_network_reply *response = reply;
 	uint16_t operation = le16toh(response->common.header.operation);
 	if (operation == HYPER_IO_RELEASE_MEMORY && size == 40 && b->managed) {
 		int status = release_memory(b);
@@ -124,6 +133,9 @@ static uint32_t dispatch(struct backend *b, struct hyper_io_session *session,
 	}
 	if (!hyper_io_session_preparable(session))
 		return HYPER_IO_INVALID;
+	if (operation == HYPER_IO_RANDOM)
+		return b->blocks ? random_request(message, size, reply, reply_size)
+				 : HYPER_IO_UNSUPPORTED;
 	if (operation >= HYPER_IO_BLOCK_HELLO && operation <= HYPER_IO_BLOCK_BIND)
 		return block_dispatch(b, message, size, response, reply_size);
 	switch (operation) {
@@ -202,7 +214,12 @@ static uint32_t dispatch(struct backend *b, struct hyper_io_session *session,
 static int serve(struct backend *b, int control)
 {
 	unsigned char message[HYPER_IO_RECORD], previous[HYPER_IO_RECORD];
-	struct hyper_io_network_reply response = {0}, previous_reply = {0};
+	union {
+		struct hyper_io_network_reply network;
+		struct hyper_io_random_reply random;
+	} response = {0};
+	/* Random bodies must never enter the replay cache. */
+	struct hyper_io_network_reply previous_reply = {0};
 	struct hyper_io_session session = {0};
 	uint64_t last_transaction = 0;
 	size_t previous_size = 0;
@@ -243,40 +260,48 @@ static int serve(struct backend *b, int control)
 			last_transaction = 0;
 			previous_size = 0;
 		}
-		if (admission >= 0 && transaction == last_transaction &&
+		if (admission >= 0 && operation != HYPER_IO_RANDOM &&
+		    transaction == last_transaction &&
 		    (size_t)size == previous_size &&
 		    !memcmp(previous, message, previous_size)) {
-			response = previous_reply;
+			response.network = previous_reply;
 		} else {
 			memset(&response, 0, sizeof(response));
-			response.common.header = header;
+			response.network.common.header = header;
 			size_t reply_size = 48;
 			uint32_t status = HYPER_IO_INVALID;
 			if (admission >= 0 && transaction > last_transaction)
 				status =
 				    dispatch(b, &session, message, (size_t)size,
 					     &response, &reply_size);
-			response.common.header.length = htole32(reply_size);
-			response.common.header.flags = htole32(HYPER_IO_REPLY);
-			response.common.status = htole32(status);
+			response.network.common.header.length = htole32(reply_size);
+			response.network.common.header.flags = htole32(HYPER_IO_REPLY);
+			response.network.common.status = htole32(status);
 			if (admission >= 0 && transaction > last_transaction) {
 				session.epoch[device] = epoch;
 				last_transaction = transaction;
-				previous_size = size;
-				memcpy(previous, message, size);
-				previous_reply = response;
+				previous_size = 0;
+				memset(&previous_reply, 0, sizeof(previous_reply));
+				if (operation != HYPER_IO_RANDOM) {
+					previous_size = size;
+					memcpy(previous, message, size);
+					previous_reply = response.network;
+				}
 			}
 		}
 		diagnostic(b, "reply %s: %s", operation_name(operation),
-			   status_name(le32toh(response.common.status)));
+			   status_name(le32toh(response.network.common.status)));
+		size_t response_size = le32toh(response.network.common.header.length);
 		ssize_t written;
 		do {
-			written = write(control, &response,
-					le32toh(response.common.header.length));
+			written = write(control, &response, response_size);
 		} while (written < 0 && errno == EINTR && !stopping);
-		if (stopping || (written < 0 && errno == EPIPE))
+		int write_error = errno;
+		/* Clear before every exit, including failed/short transport writes. */
+		explicit_bzero(&response, sizeof(response));
+		if (stopping || (written < 0 && write_error == EPIPE))
 			return 0;
-		if (written != (ssize_t)le32toh(response.common.header.length))
+		if (written != (ssize_t)response_size)
 			return -1;
 	}
 	return 0;
