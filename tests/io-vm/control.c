@@ -33,6 +33,7 @@ static int target_access(const char *path, int mode)
 
 static unsigned random_calls;
 static int random_error, random_short, random_first_not_ready;
+static unsigned random_fail_call;
 static const char random_marker[] = "secret-random-body-never-log";
 ssize_t test_getrandom(void *buffer, size_t bytes, unsigned flags)
 {
@@ -41,8 +42,10 @@ ssize_t test_getrandom(void *buffer, size_t bytes, unsigned flags)
 	random_calls++;
 	memset(buffer, 0x93, bytes);
 	memcpy(buffer, random_marker, bytes < sizeof(random_marker) ? bytes : sizeof(random_marker));
-	if (random_error || (random_first_not_ready && random_calls == 1)) {
-		errno = random_error ? random_error : EAGAIN;
+	if (random_error || random_calls == random_fail_call ||
+	    (random_first_not_ready && random_calls == 1)) {
+		errno = random_error ? random_error :
+			random_calls == random_fail_call ? EIO : EAGAIN;
 		return -1;
 	}
 	return random_short ? (ssize_t)bytes - 1 : (ssize_t)bytes;
@@ -112,8 +115,9 @@ static void random_session(void)
 		endpoint_init(&b.net);
 		random_calls = 0;
 		random_first_not_ready = 1;
+		random_fail_call = 5;
 		assert(serve(&b, sockets[1]) == -1);
-		assert(random_calls == 4);
+		assert(random_calls == 5);
 		close(sockets[1]);
 		_exit(0);
 	}
@@ -133,6 +137,7 @@ static void random_session(void)
 		{HYPER_IO_BLOCK_HELLO, 0, HYPER_IO_OK, 6}, /* ordinary replay */
 		{HYPER_IO_RANDOM, 192, HYPER_IO_OK, 7},
 		{HYPER_IO_BLOCK_HELLO, 0, HYPER_IO_INVALID, 7}, /* cannot alias random tx */
+		{HYPER_IO_RANDOM, 192, HYPER_IO_BACKEND_FAILURE, 8},
 	};
 	for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
 		unsigned size = cases[i].op == HYPER_IO_RANDOM ? 48 : 40;
@@ -166,7 +171,10 @@ static void random_session(void)
 	ssize_t bytes = read(logs[0], log, sizeof(log) - 1);
 	assert(bytes > 0);
 	log[bytes] = 0;
-	assert(strstr(log, "RANDOM") && !strstr(log, random_marker));
+	/* Success, NOT_READY, backend failures and rejected draws stay silent;
+	 * unrelated control diagnostics and fatal transport handling are intact. */
+	assert(strstr(log, "request BLOCK_HELLO") && strstr(log, "reply BLOCK_HELLO"));
+	assert(!strstr(log, "RANDOM") && !strstr(log, random_marker));
 	close(logs[0]);
 }
 
