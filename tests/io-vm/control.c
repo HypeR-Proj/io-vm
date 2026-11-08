@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
+#define getrandom test_getrandom
 #define main service_entry
 #include "../../service/hyper-io-service.c"
 #undef main
+#undef getrandom
 #include "../../service/memory.c"
 #include "../../service/network-config.c"
 #include "../../service/network.c"
@@ -27,6 +29,146 @@ static int target_access(const char *path, int mode)
 #undef access
 #include "../../service/block.c"
 #include "../../service/client-config.c"
+
+
+static unsigned random_calls;
+static int random_error, random_short, random_first_not_ready;
+static const char random_marker[] = "secret-random-body-never-log";
+ssize_t test_getrandom(void *buffer, size_t bytes, unsigned flags)
+{
+	assert(flags == GRND_NONBLOCK);
+	assert(bytes && bytes <= HYPER_IO_RANDOM_MAX);
+	random_calls++;
+	memset(buffer, 0x93, bytes);
+	memcpy(buffer, random_marker, bytes < sizeof(random_marker) ? bytes : sizeof(random_marker));
+	if (random_error || (random_first_not_ready && random_calls == 1)) {
+		errno = random_error ? random_error : EAGAIN;
+		return -1;
+	}
+	return random_short ? (ssize_t)bytes - 1 : (ssize_t)bytes;
+}
+
+static void random_boundaries(void)
+{
+	struct backend backend = {.blocks = (struct block_owner *)1};
+	struct hyper_io_session session = {.binding = 1};
+	struct hyper_io_random request = {.header.operation = htole16(HYPER_IO_RANDOM)};
+	struct hyper_io_random_reply reply = {0};
+	unsigned counts[] = {0, 1, 192, 193, UINT32_MAX};
+	for (unsigned i = 0; i < sizeof(counts) / sizeof(counts[0]); ++i) {
+		request.bytes = htole32(counts[i]);
+		reply.header = request.header;
+		size_t size = 48;
+		unsigned before = random_calls;
+		unsigned status = dispatch(&backend, &session, (void *)&request, sizeof(request), &reply, &size);
+		int valid = counts[i] == 1 || counts[i] == 192;
+		assert(status == (valid ? HYPER_IO_OK : HYPER_IO_INVALID));
+		assert(size == (valid ? 48 + counts[i] : 48));
+		assert(le32toh(reply.bytes) == (valid ? counts[i] : 0));
+		assert(random_calls == before + valid);
+	}
+	request.bytes = htole32(192);
+	unsigned errors[] = {EAGAIN, ENOSYS, EINTR, EIO, 0};
+	unsigned statuses[] = {HYPER_IO_NOT_READY, HYPER_IO_UNSUPPORTED,
+		HYPER_IO_BACKEND_FAILURE, HYPER_IO_BACKEND_FAILURE, HYPER_IO_BACKEND_FAILURE};
+	for (unsigned i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+		random_error = errors[i];
+		random_short = !random_error;
+		size_t size = 240;
+		assert(dispatch(&backend, &session, (void *)&request, sizeof(request), &reply, &size) == statuses[i]);
+		assert(size == 48 && !reply.bytes);
+		for (unsigned j = 0; j < sizeof(reply.data); ++j)
+			assert(!reply.data[j]);
+	}
+	random_error = random_short = 0;
+	for (unsigned size = 40; size <= 56; size += 8) {
+		request.reserved = htole32(size == 48);
+		size_t reply_size = 48;
+		assert(dispatch(&backend, &session, (void *)&request, size, &reply, &reply_size) == HYPER_IO_INVALID);
+	}
+	backend.blocks = NULL;
+	request.reserved = 0;
+	size_t size = 48;
+	assert(dispatch(&backend, &session, (void *)&request, sizeof(request), &reply, &size) == HYPER_IO_UNSUPPORTED);
+	reply.header.operation = htole16(65535);
+	assert(dispatch(&backend, &session, (void *)&request, sizeof(request), &reply, &size) == HYPER_IO_UNSUPPORTED);
+}
+
+static void random_session(void)
+{
+	int sockets[2], logs[2];
+	assert(!socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets));
+	assert(!pipe(logs));
+	pid_t child = fork();
+	assert(child >= 0);
+	if (!child) {
+		close(sockets[0]);
+		close(logs[0]);
+		assert(dup2(logs[1], STDERR_FILENO) >= 0);
+		close(logs[1]);
+		struct backend b = {.blocks = (struct block_owner *)1,
+			.managed = 1, .memory = MAP_FAILED, .memory_fd = -1, .tap = -1};
+		endpoint_init(&b.disk);
+		endpoint_init(&b.net);
+		random_calls = 0;
+		random_first_not_ready = 1;
+		assert(serve(&b, sockets[1]) == -1);
+		assert(random_calls == 4);
+		close(sockets[1]);
+		_exit(0);
+	}
+	close(sockets[1]);
+	close(logs[1]);
+	const struct { unsigned op, count, status; uint64_t tx; } cases[] = {
+		{HYPER_IO_BLOCK_HELLO, 0, HYPER_IO_OK, 1},
+		{HYPER_IO_RANDOM, 192, HYPER_IO_NOT_READY, 2},
+		{HYPER_IO_RANDOM, 192, HYPER_IO_INVALID, 2},
+		{HYPER_IO_RANDOM, 192, HYPER_IO_OK, 3},
+		{HYPER_IO_RANDOM, 192, HYPER_IO_INVALID, 3},
+		{HYPER_IO_RANDOM, 1, HYPER_IO_INVALID, 3},
+		{HYPER_IO_RANDOM, 192, HYPER_IO_INVALID, 2},
+		{HYPER_IO_RANDOM, 1, HYPER_IO_OK, 4},
+		{65535, 0, HYPER_IO_UNSUPPORTED, 5},
+		{HYPER_IO_BLOCK_HELLO, 0, HYPER_IO_OK, 6},
+		{HYPER_IO_BLOCK_HELLO, 0, HYPER_IO_OK, 6}, /* ordinary replay */
+		{HYPER_IO_RANDOM, 192, HYPER_IO_OK, 7},
+		{HYPER_IO_BLOCK_HELLO, 0, HYPER_IO_INVALID, 7}, /* cannot alias random tx */
+	};
+	for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+		unsigned size = cases[i].op == HYPER_IO_RANDOM ? 48 : 40;
+		struct hyper_io_random request = {.header = {
+			.magic = htole32(HYPER_IO_MAGIC), .version = htole16(HYPER_IO_VERSION),
+			.operation = htole16(cases[i].op), .length = htole32(size),
+			.binding = htole64(7), .epoch = htole64(1), .transaction = htole64(cases[i].tx)},
+			.bytes = htole32(cases[i].count)};
+		assert(write(sockets[0], &request, size) == size);
+		union { struct hyper_io_random_reply random; struct hyper_io_reply common; } reply;
+		memset(&reply, 0, sizeof(reply));
+		ssize_t bytes = read(sockets[0], &reply, sizeof(reply));
+		assert(le32toh(reply.common.status) == cases[i].status);
+		assert(le64toh(reply.common.header.transaction) == cases[i].tx);
+		assert(bytes >= 48 && le32toh(reply.common.header.length) == (uint32_t)bytes);
+		if (cases[i].op == HYPER_IO_BLOCK_HELLO && cases[i].status == HYPER_IO_OK) {
+			assert(bytes == 64 && le64toh(reply.common.features) == HYPER_IO_OWNER_FEATURES);
+		} else if (cases[i].status == HYPER_IO_OK) {
+			assert(bytes == (ssize_t)(48 + cases[i].count) && le32toh(reply.random.bytes) == cases[i].count);
+			assert(!memcmp(reply.random.data, random_marker,
+				cases[i].count < sizeof(random_marker) ? cases[i].count : sizeof(random_marker)));
+		} else {
+			assert(bytes == 48 && !reply.random.bytes);
+		}
+	}
+	close(sockets[0]);
+	int status;
+	assert(waitpid(child, &status, 0) == child);
+	assert(WIFEXITED(status) && !WEXITSTATUS(status));
+	char log[4096];
+	ssize_t bytes = read(logs[0], log, sizeof(log) - 1);
+	assert(bytes > 0);
+	log[bytes] = 0;
+	assert(strstr(log, "RANDOM") && !strstr(log, random_marker));
+	close(logs[0]);
+}
 
 static void storage_admission(void)
 {
@@ -344,6 +486,8 @@ int main(void)
 	assert(activate_disk(&dormant, &activation) == HYPER_IO_INVALID);
 	assert(dormant.disk.fd == -1 && !dormant.disk.bound &&
 	       !dormant.disk.attached);
+	random_boundaries();
+	random_session();
 	managed_session();
 	notification_queues();
 	network_only_session();

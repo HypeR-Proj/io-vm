@@ -43,7 +43,7 @@ int main(void)
 	struct hyper_io_header hello = {.operation =
 					    htole16(HYPER_IO_BLOCK_HELLO)};
 	assert(exchange(&backend, &hello, sizeof(hello)) == HYPER_IO_OK);
-	assert(le64toh(reply.network.common.features) == 7);
+	assert(le64toh(reply.network.common.features) == HYPER_IO_OWNER_FEATURES);
 	struct hyper_io_block_enum query = {.header.operation =
 						htole16(HYPER_IO_BLOCK_ENUM)};
 	assert(exchange(&backend, &query, sizeof(query)) == HYPER_IO_OK);

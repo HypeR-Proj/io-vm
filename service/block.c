@@ -197,7 +197,7 @@ unsigned block_dispatch(struct backend *backend, const unsigned char *message,
 	unsigned operation = le16toh(header.operation);
 	if (operation == HYPER_IO_BLOCK_HELLO && size == 40) {
 		struct hyper_io_reply *response = reply;
-		response->features = htole64(7);
+		response->features = htole64(HYPER_IO_OWNER_FEATURES);
 		response->queues = htole32(HYPER_IO_BLOCK_MAX_READ);
 		*reply_size = 64;
 		return HYPER_IO_OK;

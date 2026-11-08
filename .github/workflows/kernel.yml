@@ -76,6 +76,8 @@ jobs:
           aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -Iinclude \
             tests/io-vm/block-owner.c service/block.c service/block-target.c \
             service/client-config.c -o ${{ env.OUT }}/build/io-vm/block-owner-test
+          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -Iinclude \
+            tests/io-vm/random.c -o ${{ env.OUT }}/build/io-vm/random-test
           python3 - <<'PYTHON'
           import json
           import subprocess
@@ -84,6 +86,7 @@ jobs:
           subprocess.run(['python3', '-B', 'tests/io-vm/block-owner.py',
                           '--base', base['directory'], '--manifest-sha256', base['manifest_sha256'],
                           '--test-binary', '${{ env.OUT }}/build/io-vm/block-owner-test',
+                          '--random-test-binary', '${{ env.OUT }}/build/io-vm/random-test',
                           '--log', '${{ env.OUT }}/build/io-vm/block-owner.log'], check=True)
           PYTHON
       - name: Verify TAP checksum and segmentation fallback
