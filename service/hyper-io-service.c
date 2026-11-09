@@ -249,7 +249,10 @@ static int serve(struct backend *b, int control)
 		    le32toh(header.length) != (uint32_t)size || header.flags ||
 		    !binding || !transaction || !epoch || epoch > UINT32_MAX)
 			return -1;
-		diagnostic(b, "request %s", operation_name(operation));
+		/* Random draws are a hot path. Report their status only on the wire;
+		 * even NOT_READY retries must not generate an unbounded serial log. */
+		if (operation != HYPER_IO_RANDOM)
+			diagnostic(b, "request %s", operation_name(operation));
 		unsigned hello = b->blocks ? HYPER_IO_BLOCK_HELLO :
 			primary ? HYPER_IO_NETWORK_HELLO : HYPER_IO_HELLO;
 		int admission = hyper_io_session_admit(
@@ -289,8 +292,9 @@ static int serve(struct backend *b, int control)
 				}
 			}
 		}
-		diagnostic(b, "reply %s: %s", operation_name(operation),
-			   status_name(le32toh(response.network.common.status)));
+		if (operation != HYPER_IO_RANDOM)
+			diagnostic(b, "reply %s: %s", operation_name(operation),
+				   status_name(le32toh(response.network.common.status)));
 		size_t response_size = le32toh(response.network.common.header.length);
 		ssize_t written;
 		do {
